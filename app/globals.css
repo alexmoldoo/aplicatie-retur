@@ -1,0 +1,224 @@
+:root {
+  --bg-primary: #fff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #fafafa;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --border-color: #e0e0e0;
+  --input-bg: #fff;
+  --input-border: #e0e0e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #2d2d2d;
+    --bg-secondary: #3d3d3d;
+    --bg-tertiary: #3d3d3d;
+    --text-primary: #e0e0e0;
+    --text-secondary: #b0b0b0;
+    --border-color: #555;
+    --input-bg: #3d3d3d;
+    --input-border: #555;
+  }
+  
+  body {
+    background: linear-gradient(180deg, #1a1a1a 0%, #2d2d2d 100%);
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(180deg, #e0f2f1 0%, #b2dfdb 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+  color: var(--text-primary);
+}
+
+#__next {
+  width: 100%;
+  max-width: 1200px;
+}
+
+/* Responsive pentru telefon (până la 480px) */
+@media (max-width: 480px) {
+  body {
+    padding: 10px;
+  }
+}
+
+/* Responsive pentru tabletă (481px - 768px) */
+@media (min-width: 481px) and (max-width: 768px) {
+  body {
+    padding: 15px;
+  }
+}
+
+/* Responsive pentru laptop/desktop (peste 768px) */
+@media (min-width: 769px) {
+  body {
+    padding: 20px;
+  }
+}
+
+/* Responsive styles pentru step forms */
+.step-form {
+  min-height: 300px;
+  width: 100%;
+}
+
+@media (min-width: 481px) {
+  .step-form {
+    min-height: 350px;
+  }
+}
+
+@media (min-width: 769px) {
+  .step-form {
+    min-height: 400px;
+  }
+}
+
+.step-form-large {
+  min-height: 400px;
+  width: 100%;
+}
+
+@media (min-width: 481px) {
+  .step-form-large {
+    min-height: 450px;
+  }
+}
+
+@media (min-width: 769px) {
+  .step-form-large {
+    min-height: 500px;
+  }
+}
+
+.step-container {
+  min-height: 300px;
+  width: 100%;
+}
+
+@media (min-width: 481px) {
+  .step-container {
+    min-height: 350px;
+  }
+}
+
+@media (min-width: 769px) {
+  .step-container {
+    min-height: 400px;
+  }
+}
+
+.step-container-large {
+  min-height: 400px;
+  width: 100%;
+}
+
+@media (min-width: 481px) {
+  .step-container-large {
+    min-height: 450px;
+  }
+}
+
+@media (min-width: 769px) {
+  .step-container-large {
+    min-height: 500px;
+  }
+}
+
+.return-container {
+  padding: 20px;
+  min-height: 400px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+@media (min-width: 481px) {
+  .return-container {
+    padding: 30px;
+    min-height: 500px;
+  }
+}
+
+@media (min-width: 769px) {
+  .return-container {
+    padding: 40px;
+    min-height: 600px;
+  }
+}
+
+/* Dark mode support pentru input-uri - fără !important */
+@media (prefers-color-scheme: dark) {
+  input[type="text"],
+  input[type="email"],
+  input[type="number"],
+  input[type="tel"],
+  textarea,
+  select {
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    border-color: var(--input-border);
+  }
+  
+  input[type="text"]:focus,
+  input[type="email"]:focus,
+  input[type="number"]:focus,
+  input[type="tel"]:focus,
+  textarea:focus,
+  select:focus {
+    border-color: #26a69a;
+    background-color: var(--input-bg);
+  }
+  
+  input[type="text"]:disabled,
+  input[type="email"]:disabled,
+  input[type="number"]:disabled,
+  input[type="tel"]:disabled,
+  textarea:disabled,
+  select:disabled {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    opacity: 0.6;
+  }
+  
+  table {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+  
+  thead {
+    background-color: var(--bg-secondary);
+  }
+  
+  tbody tr {
+    background-color: var(--bg-primary);
+  }
+  
+  tbody tr:hover {
+    background-color: var(--bg-secondary);
+  }
+  
+  label {
+    color: var(--text-primary);
+  }
+  
+  p, h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+  }
+}
