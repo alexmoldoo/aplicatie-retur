@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     // Găsește utilizatorul
     const user = await findUserByEmail(email)
-    
+
     if (!user) {
       return NextResponse.json(
         { success: false, message: 'Email sau parolă incorectă' },
