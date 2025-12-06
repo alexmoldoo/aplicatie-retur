@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { destroySessionFromCookies } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 export async function POST() {
   try {

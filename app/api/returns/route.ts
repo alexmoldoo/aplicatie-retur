@@ -4,6 +4,7 @@ import { getReturns } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 /**
  * GET - Obține lista tuturor retururilor

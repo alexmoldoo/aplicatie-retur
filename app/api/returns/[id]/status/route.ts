@@ -4,6 +4,7 @@ import { updateReturnStatus } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 /**
  * PATCH - Actualizează statusul unui retur

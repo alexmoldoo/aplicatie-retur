@@ -5,6 +5,7 @@ import { getCurrentUserFromCookies } from '@/lib/auth'
 import fs from 'fs'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 /**
  * GET - Obține detalii despre un retur specific

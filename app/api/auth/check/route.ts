@@ -4,6 +4,7 @@ import { getSessionFromCookies } from '@/lib/auth'
 import { findUserById } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 export async function GET() {
   try {
