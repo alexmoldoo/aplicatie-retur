@@ -114,3 +114,79 @@ export async function authenticate(email: string, password: string): Promise<Use
   return user
 }
 
+/**
+ * Versiuni care acceptă cookieStore ca parametru (pentru Vercel/producție)
+ */
+
+/**
+ * Obține sesiunea din cookieStore furnizat
+ */
+export async function getSessionFromCookies(cookieStore: any): Promise<Session | null> {
+  try {
+    const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME)
+    
+    if (!sessionCookie) {
+      return null
+    }
+    
+    const session: Session = JSON.parse(sessionCookie.value)
+    
+    // Verifică dacă sesiunea a expirat
+    if (session.expiresAt < Date.now()) {
+      destroySessionFromCookies(cookieStore)
+      return null
+    }
+    
+    return session
+  } catch (error) {
+    return null
+  }
+}
+
+/**
+ * Creează o sesiune folosind cookieStore furnizat
+ */
+export function createSessionWithCookies(
+  userId: string, 
+  email: string, 
+  cookieStore: any
+): string {
+  const sessionId = `${userId}_${Date.now()}_${Math.random().toString(36).substring(7)}`
+  const expiresAt = Date.now() + SESSION_DURATION
+  
+  const session: Session = {
+    userId,
+    email,
+    expiresAt,
+  }
+  
+  cookieStore.set(SESSION_COOKIE_NAME, JSON.stringify(session), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: SESSION_DURATION / 1000,
+    path: '/',
+  })
+  
+  return sessionId
+}
+
+/**
+ * Distruge sesiunea folosind cookieStore furnizat
+ */
+export function destroySessionFromCookies(cookieStore: any): void {
+  cookieStore.delete(SESSION_COOKIE_NAME)
+}
+
+/**
+ * Obține utilizatorul curent folosind cookieStore furnizat
+ */
+export async function getCurrentUserFromCookies(cookieStore: any): Promise<User | null> {
+  const session = await getSessionFromCookies(cookieStore)
+  if (!session) {
+    return null
+  }
+  
+  return await findUserById(session.userId)
+}
+

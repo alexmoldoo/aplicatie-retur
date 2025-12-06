@@ -1,18 +1,20 @@
 import { NextResponse } from 'next/server'
-import { destroySession } from '@/lib/auth'
+import { cookies } from 'next/headers'
+import { destroySessionFromCookies } from '@/lib/auth'
 
 export async function POST() {
   try {
-    await destroySession()
+    const cookieStore = await cookies()
+    destroySessionFromCookies(cookieStore)
     
     return NextResponse.json({
       success: true,
       message: 'Deconectare reușită',
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in logout API:', error)
     return NextResponse.json(
-      { success: false, message: 'Eroare la deconectare' },
+      { success: false, message: 'Eroare la deconectare', error: error?.message },
       { status: 500 }
     )
   }

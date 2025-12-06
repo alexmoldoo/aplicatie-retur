@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { getReturns } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUserFromCookies } from '@/lib/auth'
 
 /**
  * GET - Obține lista tuturor retururilor
  */
 export async function GET(request: NextRequest) {
   try {
-    const user = await getCurrentUser()
+    const cookieStore = await cookies()
+    const user = await getCurrentUserFromCookies(cookieStore)
     
     if (!user) {
       return NextResponse.json(

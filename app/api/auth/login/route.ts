@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { authenticate } from '@/lib/auth'
+import { cookies } from 'next/headers'
+import { findUserByEmail, verifyPassword } from '@/lib/db'
+import { createSessionWithCookies } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,15 +16,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Autentifică utilizatorul
-    const user = await authenticate(email, password)
-
+    // Găsește utilizatorul
+    const user = await findUserByEmail(email)
+    
     if (!user) {
       return NextResponse.json(
         { success: false, message: 'Email sau parolă incorectă' },
         { status: 401 }
       )
     }
+
+    // Verifică parola
+    if (!verifyPassword(password, user.passwordHash)) {
+      return NextResponse.json(
+        { success: false, message: 'Email sau parolă incorectă' },
+        { status: 401 }
+      )
+    }
+
+    // Creează sesiune folosind cookieStore direct
+    const cookieStore = await cookies()
+    createSessionWithCookies(user.id, user.email, cookieStore)
 
     return NextResponse.json({
       success: true,
@@ -34,10 +48,10 @@ export async function POST(request: NextRequest) {
         email: user.email,
       },
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in login API:', error)
     return NextResponse.json(
-      { success: false, message: 'Eroare la procesarea cererii' },
+      { success: false, message: 'Eroare la procesarea cererii', error: error?.message },
       { status: 500 }
     )
   }

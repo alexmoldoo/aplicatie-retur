@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
+import { cookies } from 'next/headers'
+import { getCurrentUserFromCookies } from '@/lib/auth'
 import { getConfig, updateShopifyConfig, updateExcludedSKUs } from '@/lib/db'
 
 /**
@@ -7,7 +8,8 @@ import { getConfig, updateShopifyConfig, updateExcludedSKUs } from '@/lib/db'
  */
 export async function GET() {
   try {
-    const user = await getCurrentUser()
+    const cookieStore = await cookies()
+    const user = await getCurrentUserFromCookies(cookieStore)
     
     if (!user) {
       return NextResponse.json(
@@ -44,7 +46,8 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const user = await getCurrentUser()
+    const cookieStore = await cookies()
+    const user = await getCurrentUserFromCookies(cookieStore)
     
     if (!user) {
       return NextResponse.json(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { updateReturnDocuments } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
+import { getCurrentUserFromCookies } from '@/lib/auth'
 
 /**
  * POST - Actualizează documentele unui retur (AWB, poze)
@@ -10,7 +11,8 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await getCurrentUser()
+    const cookieStore = await cookies()
+    const user = await getCurrentUserFromCookies(cookieStore)
     
     if (!user) {
       return NextResponse.json(

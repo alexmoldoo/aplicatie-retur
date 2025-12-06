@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { createUser } from '@/lib/db'
+import { createSessionWithCookies } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,6 +34,10 @@ export async function POST(request: NextRequest) {
     try {
       const user = await createUser(nume, prenume, email, password)
       
+      // Creează sesiune automat după înregistrare folosind cookieStore direct
+      const cookieStore = await cookies()
+      createSessionWithCookies(user.id, user.email, cookieStore)
+      
       return NextResponse.json({
         success: true,
         message: 'Cont creat cu succes',
@@ -48,10 +54,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in register API:', error)
     return NextResponse.json(
-      { success: false, message: 'Eroare la procesarea cererii' },
+      { success: false, message: 'Eroare la procesarea cererii', error: error?.message },
       { status: 500 }
     )
   }
