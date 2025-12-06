@@ -20,7 +20,7 @@ export async function GET(
       )
     }
 
-    const returnData = findReturnById(params.id)
+    const returnData = await findReturnById(params.id)
     
     if (!returnData) {
       return NextResponse.json(
@@ -72,7 +72,7 @@ export async function PUT(
     } = body
 
     const { updateReturn } = await import('@/lib/db')
-    const updatedReturn = updateReturn(params.id, {
+    const updatedReturn = await updateReturn(params.id, {
       orderData,
       products,
       refundData,
@@ -120,7 +120,7 @@ export async function DELETE(
       )
     }
 
-    const success = deleteReturn(params.id)
+    const success = await deleteReturn(params.id)
     
     if (!success) {
       return NextResponse.json(

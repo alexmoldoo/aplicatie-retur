@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Obține credențialele Shopify din configurație sau variabilele de mediu
-    const config = getConfig()
+    const config = await getConfig()
     
     const shopifyDomain = config.shopify.domain || process.env.SHOPIFY_DOMAIN
     const shopifyAccessToken = config.shopify.accessToken || process.env.SHOPIFY_ACCESS_TOKEN

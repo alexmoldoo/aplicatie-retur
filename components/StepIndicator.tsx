@@ -14,11 +14,13 @@ export default function StepIndicator({ currentStep }: StepIndicatorProps) {
   return (
     <div style={{
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
       marginBottom: '30px',
       position: 'relative',
-      gap: '8px'
+      width: '100%',
+      padding: '0',
+      boxSizing: 'border-box'
     }}>
       {steps.map((step, index) => {
         const isActive = currentStep >= step.number
@@ -29,11 +31,28 @@ export default function StepIndicator({ currentStep }: StepIndicatorProps) {
             display: 'flex', 
             alignItems: 'center', 
             flexDirection: 'column',
-            minWidth: '80px'
+            flex: '1',
+            minWidth: 0,
+            position: 'relative',
+            zIndex: 2
           }}>
+            {/* Linia de conectare înainte de număr */}
+            {index > 0 && (
+              <div style={{
+                position: 'absolute',
+                left: '0',
+                top: '16px',
+                width: '50%',
+                height: '2px',
+                backgroundColor: currentStep >= step.number ? '#26a69a' : '#e0e0e0',
+                zIndex: 0
+              }} />
+            )}
+            
+            {/* Numărul */}
             <div style={{
-              width: '40px',
-              height: '40px',
+              width: '32px',
+              height: '32px',
               borderRadius: '50%',
               backgroundColor: isActive ? '#26a69a' : '#e0e0e0',
               color: isActive ? '#fff' : '#999',
@@ -41,35 +60,44 @@ export default function StepIndicator({ currentStep }: StepIndicatorProps) {
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 'bold',
-              fontSize: '16px',
-              marginBottom: '8px',
+              fontSize: '14px',
+              marginBottom: '6px',
               transition: 'all 0.3s ease',
-              border: isCurrent ? '3px solid #26a69a' : 'none',
-              boxShadow: isCurrent ? '0 0 0 3px rgba(38, 166, 154, 0.2)' : 'none'
+              border: isCurrent ? '2px solid #26a69a' : 'none',
+              boxShadow: isCurrent ? '0 0 0 2px rgba(38, 166, 154, 0.2)' : 'none',
+              flexShrink: 0,
+              position: 'relative',
+              zIndex: 1
             }}>
               {step.number}
             </div>
-            <span style={{
-              fontSize: '11px',
-              color: isActive ? '#26a69a' : '#999',
-              fontWeight: isCurrent ? 'bold' : 'normal',
-              textAlign: 'center',
-              lineHeight: '1.2'
-            }}>
-              {step.label}
-            </span>
+            
+            {/* Linia de conectare după număr */}
             {index < steps.length - 1 && (
               <div style={{
                 position: 'absolute',
-                left: `calc(${(index + 1) * 20}% + 20px)`,
-                top: '20px',
-                width: 'calc(20% - 40px)',
+                right: '0',
+                top: '16px',
+                width: '50%',
                 height: '2px',
                 backgroundColor: currentStep > step.number ? '#26a69a' : '#e0e0e0',
-                zIndex: -1,
-                transition: 'all 0.3s ease'
+                zIndex: 0
               }} />
             )}
+            
+            {/* Label */}
+            <span style={{
+              fontSize: '9px',
+              color: isActive ? '#26a69a' : '#999',
+              fontWeight: isCurrent ? 'bold' : 'normal',
+              textAlign: 'center',
+              lineHeight: '1.2',
+              wordBreak: 'break-word',
+              maxWidth: '100%',
+              padding: '0 2px'
+            }}>
+              {step.label}
+            </span>
           </div>
         )
       })}

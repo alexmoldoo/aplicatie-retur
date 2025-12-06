@@ -29,7 +29,7 @@ export async function PATCH(
       )
     }
 
-    const updatedReturn = updateReturnStatus(params.id, status as any)
+    const updatedReturn = await updateReturnStatus(params.id, status as any)
     
     if (!updatedReturn) {
       return NextResponse.json(

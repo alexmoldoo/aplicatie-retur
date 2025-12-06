@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const returnData = findReturnById(params.id)
+    const returnData = await findReturnById(params.id)
     
     if (!returnData) {
       return NextResponse.json(

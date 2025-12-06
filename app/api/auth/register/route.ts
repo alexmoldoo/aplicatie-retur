@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
 
     // Creează utilizatorul
     try {
-      const user = createUser(nume, prenume, email, password)
+      const user = await createUser(nume, prenume, email, password)
       
       return NextResponse.json({
         success: true,

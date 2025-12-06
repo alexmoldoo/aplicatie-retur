@@ -22,7 +22,7 @@ export async function POST(
     const body = await request.json()
     const { awbNumber, shippingReceiptPhoto, packageLabelPhoto } = body
 
-    const updatedReturn = updateReturnDocuments(
+    const updatedReturn = await updateReturnDocuments(
       params.id,
       awbNumber,
       shippingReceiptPhoto,

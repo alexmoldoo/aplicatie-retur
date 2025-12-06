@@ -6,7 +6,7 @@ import { getConfig } from '@/lib/db'
  */
 export async function GET() {
   try {
-    const config = getConfig()
+    const config = await getConfig()
     
     return NextResponse.json({
       success: true,

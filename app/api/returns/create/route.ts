@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     }, 0)
 
     // Generează ID retur
-    const idRetur = generateReturnId()
+    const idRetur = await generateReturnId()
 
     // Obține baseUrl pentru generarea link-ului QR code
     const origin = request.headers.get('origin') || request.headers.get('host')
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     fs.writeFileSync(pdfPath, pdfBuffer)
 
     // Creează returul în baza de date
-    const newReturn = createReturn(
+    const newReturn = await createReturn(
       orderData.numarComanda,
       orderDataForReturn,
       products,

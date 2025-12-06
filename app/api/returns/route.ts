@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
     
-    let returns = getReturns()
+    let returns = await getReturns()
     
     // Filtrare după status dacă este specificat
     if (status) {

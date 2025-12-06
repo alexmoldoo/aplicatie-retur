@@ -1,46 +1,52 @@
 /**
- * Baza de date simplă folosind JSON pentru stocare
- * În producție, ar trebui să folosești o bază de date reală (PostgreSQL, MySQL, etc.)
+ * Baza de date Supabase (PostgreSQL)
+ * Fallback la JSON pentru development local dacă Supabase nu este configurat
  */
 
+import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
+const supabaseUrl = process.env.SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+// Client Supabase pentru server-side
+const supabase = supabaseUrl && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null
+
+// Fallback pentru development local (JSON files)
 const DB_DIR = path.join(process.cwd(), 'data')
 const RETURNS_DIR = path.join(DB_DIR, 'retururi')
 const USERS_FILE = path.join(DB_DIR, 'users.json')
 const CONFIG_FILE = path.join(DB_DIR, 'config.json')
 const RETURNS_FILE = path.join(DB_DIR, 'returns.json')
 
-// Asigură-te că directorul data există
-if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR, { recursive: true })
-}
-
-// Asigură-te că directorul retururi există
-if (!fs.existsSync(RETURNS_DIR)) {
-  fs.mkdirSync(RETURNS_DIR, { recursive: true })
-}
-
-// Inițializează fișierele JSON dacă nu există
-if (!fs.existsSync(USERS_FILE)) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2))
-}
-
-if (!fs.existsSync(CONFIG_FILE)) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify({
-    shopify: {
-      domain: '',
-      accessToken: '',
-      shopTitle: '',
-    },
-    excludedSKUs: [],
-  }, null, 2))
-}
-
-if (!fs.existsSync(RETURNS_FILE)) {
-  fs.writeFileSync(RETURNS_FILE, JSON.stringify([], null, 2))
+// Inițializează fișierele JSON pentru fallback (doar dacă Supabase nu este configurat)
+if (!supabase) {
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true })
+  }
+  if (!fs.existsSync(RETURNS_DIR)) {
+    fs.mkdirSync(RETURNS_DIR, { recursive: true })
+  }
+  if (!fs.existsSync(USERS_FILE)) {
+    fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2))
+  }
+  if (!fs.existsSync(CONFIG_FILE)) {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({
+      shopify: {
+        domain: '',
+        accessToken: '',
+        shopTitle: '',
+      },
+      excludedSKUs: [],
+    }, null, 2))
+  }
+  if (!fs.existsSync(RETURNS_FILE)) {
+    fs.writeFileSync(RETURNS_FILE, JSON.stringify([], null, 2))
+  }
 }
 
 export interface User {
@@ -122,28 +128,53 @@ export function verifyPassword(password: string, hash: string): boolean {
 }
 
 /**
- * Citește utilizatorii din baza de date
+ * Citește utilizatorii din baza de date (compatibilitate - nu folosit)
  */
 export function getUsers(): User[] {
-  try {
-    const data = fs.readFileSync(USERS_FILE, 'utf-8')
-    return JSON.parse(data)
-  } catch (error) {
-    return []
+  if (!supabase) {
+    try {
+      const data = fs.readFileSync(USERS_FILE, 'utf-8')
+      return JSON.parse(data)
+    } catch (error) {
+      return []
+    }
   }
+  return []
 }
 
 /**
- * Salvează utilizatorii în baza de date
+ * Salvează utilizatorii în baza de date (compatibilitate - nu folosit)
  */
 export function saveUsers(users: User[]): void {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2))
+  if (!supabase) {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2))
+  }
 }
 
 /**
  * Găsește un utilizator după email
  */
-export function findUserByEmail(email: string): User | null {
+export async function findUserByEmail(email: string): Promise<User | null> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email.toLowerCase())
+      .single()
+    
+    if (error || !data) return null
+    
+    return {
+      id: data.id,
+      nume: data.nume,
+      prenume: data.prenume,
+      email: data.email,
+      passwordHash: data.password_hash,
+      createdAt: data.created_at,
+    }
+  }
+  
+  // Fallback la JSON
   const users = getUsers()
   return users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null
 }
@@ -151,7 +182,27 @@ export function findUserByEmail(email: string): User | null {
 /**
  * Găsește un utilizator după ID
  */
-export function findUserById(id: string): User | null {
+export async function findUserById(id: string): Promise<User | null> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', id)
+      .single()
+    
+    if (error || !data) return null
+    
+    return {
+      id: data.id,
+      nume: data.nume,
+      prenume: data.prenume,
+      email: data.email,
+      passwordHash: data.password_hash,
+      createdAt: data.created_at,
+    }
+  }
+  
+  // Fallback la JSON
   const users = getUsers()
   return users.find(u => u.id === id) || null
 }
@@ -159,11 +210,45 @@ export function findUserById(id: string): User | null {
 /**
  * Creează un nou utilizator
  */
-export function createUser(nume: string, prenume: string, email: string, password: string): User {
+export async function createUser(nume: string, prenume: string, email: string, password: string): Promise<User> {
+  if (supabase) {
+    // Verifică dacă există deja
+    const existing = await findUserByEmail(email)
+    if (existing) {
+      throw new Error('Utilizatorul cu acest email există deja')
+    }
+    
+    const { data, error } = await supabase
+      .from('users')
+      .insert({
+        nume,
+        prenume,
+        email: email.toLowerCase(),
+        password_hash: hashPassword(password),
+      })
+      .select()
+      .single()
+    
+    if (error) {
+      throw new Error('Eroare la crearea utilizatorului: ' + error.message)
+    }
+    
+    return {
+      id: data.id,
+      nume: data.nume,
+      prenume: data.prenume,
+      email: data.email,
+      passwordHash: data.password_hash,
+      createdAt: data.created_at,
+    }
+  }
+  
+  // Fallback la JSON
   const users = getUsers()
   
   // Verifică dacă utilizatorul există deja
-  if (findUserByEmail(email)) {
+  const existing = users.find(u => u.email.toLowerCase() === email.toLowerCase())
+  if (existing) {
     throw new Error('Utilizatorul cu acest email există deja')
   }
   
@@ -185,7 +270,37 @@ export function createUser(nume: string, prenume: string, email: string, passwor
 /**
  * Citește configurația aplicației
  */
-export function getConfig(): AppConfig {
+export async function getConfig(): Promise<AppConfig> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('app_config')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (error || !data) {
+      return {
+        shopify: {
+          domain: '',
+          accessToken: '',
+          shopTitle: '',
+        },
+        excludedSKUs: [],
+      }
+    }
+    
+    return {
+      shopify: {
+        domain: data.shopify_domain || '',
+        accessToken: data.shopify_access_token || '',
+        shopTitle: data.shop_title || '',
+      },
+      excludedSKUs: (data.excluded_skus as string[]) || [],
+    }
+  }
+  
+  // Fallback la JSON
   try {
     const data = fs.readFileSync(CONFIG_FILE, 'utf-8')
     return JSON.parse(data)
@@ -202,17 +317,61 @@ export function getConfig(): AppConfig {
 }
 
 /**
- * Salvează configurația aplicației
+ * Salvează configurația aplicației (compatibilitate - nu folosit direct)
  */
 export function saveConfig(config: AppConfig): void {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
+  if (!supabase) {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
+  }
 }
 
 /**
  * Actualizează configurația Shopify
  */
-export function updateShopifyConfig(shopify: ShopifyConfig): void {
-  const config = getConfig()
+export async function updateShopifyConfig(shopify: ShopifyConfig): Promise<void> {
+  if (supabase) {
+    // Obține configurația existentă
+    const { data: existing } = await supabase
+      .from('app_config')
+      .select('id')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (existing) {
+      // Actualizează configurația existentă
+      const { error } = await supabase
+        .from('app_config')
+        .update({
+          shopify_domain: shopify.domain,
+          shopify_access_token: shopify.accessToken,
+          shop_title: shopify.shopTitle,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+      
+      if (error) {
+        throw new Error('Eroare la actualizarea configurației: ' + error.message)
+      }
+    } else {
+      // Creează configurație nouă
+      const { error } = await supabase
+        .from('app_config')
+        .insert({
+          shopify_domain: shopify.domain,
+          shopify_access_token: shopify.accessToken,
+          shop_title: shopify.shopTitle,
+        })
+      
+      if (error) {
+        throw new Error('Eroare la crearea configurației: ' + error.message)
+      }
+    }
+    return
+  }
+  
+  // Fallback la JSON
+  const config = await getConfig()
   config.shopify = shopify
   saveConfig(config)
 }
@@ -220,8 +379,43 @@ export function updateShopifyConfig(shopify: ShopifyConfig): void {
 /**
  * Actualizează SKU-urile excluse
  */
-export function updateExcludedSKUs(skus: string[]): void {
-  const config = getConfig()
+export async function updateExcludedSKUs(skus: string[]): Promise<void> {
+  if (supabase) {
+    const { data: existing } = await supabase
+      .from('app_config')
+      .select('id')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (existing) {
+      const { error } = await supabase
+        .from('app_config')
+        .update({
+          excluded_skus: skus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+      
+      if (error) {
+        throw new Error('Eroare la actualizarea SKU-urilor: ' + error.message)
+      }
+    } else {
+      const { error } = await supabase
+        .from('app_config')
+        .insert({
+          excluded_skus: skus,
+        })
+      
+      if (error) {
+        throw new Error('Eroare la crearea configurației: ' + error.message)
+      }
+    }
+    return
+  }
+  
+  // Fallback la JSON
+  const config = await getConfig()
   config.excludedSKUs = skus
   saveConfig(config)
 }
@@ -229,7 +423,34 @@ export function updateExcludedSKUs(skus: string[]): void {
 /**
  * Citește toate retururile din baza de date
  */
-export function getReturns(): Return[] {
+export async function getReturns(): Promise<Return[]> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('returns')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (error || !data) return []
+    
+    return data.map(row => ({
+      idRetur: row.id_retur,
+      numarComanda: row.numar_comanda,
+      orderData: row.order_data,
+      products: row.products,
+      refundData: row.refund_data,
+      signature: row.signature,
+      totalRefund: parseFloat(row.total_refund),
+      status: row.status,
+      createdAt: row.created_at,
+      pdfPath: row.pdf_path || '',
+      qrCodeData: row.qr_code_data || '',
+      awbNumber: row.awb_number,
+      shippingReceiptPhoto: row.shipping_receipt_photo,
+      packageLabelPhoto: row.package_label_photo,
+    }))
+  }
+  
+  // Fallback la JSON
   try {
     const data = fs.readFileSync(RETURNS_FILE, 'utf-8')
     return JSON.parse(data)
@@ -239,20 +460,42 @@ export function getReturns(): Return[] {
 }
 
 /**
- * Salvează retururile în baza de date
+ * Salvează retururile în baza de date (compatibilitate - nu folosit direct)
  */
 export function saveReturns(returns: Return[]): void {
-  fs.writeFileSync(RETURNS_FILE, JSON.stringify(returns, null, 2))
+  if (!supabase) {
+    fs.writeFileSync(RETURNS_FILE, JSON.stringify(returns, null, 2))
+  }
 }
 
 /**
  * Generează un ID de retur formatat: RET-YYYY-NNNNNN
  */
-export function generateReturnId(): string {
-  const returns = getReturns()
+export async function generateReturnId(): Promise<string> {
   const currentYear = new Date().getFullYear()
   
-  // Găsește ultimul număr pentru anul curent
+  if (supabase) {
+    // Găsește ultimul număr pentru anul curent
+    const { data } = await supabase
+      .from('returns')
+      .select('id_retur')
+      .like('id_retur', `RET-${currentYear}-%`)
+      .order('created_at', { ascending: false })
+    
+    let nextNumber = 1
+    if (data && data.length > 0) {
+      const lastReturn = data[0]
+      const match = lastReturn.id_retur.match(/RET-\d{4}-(\d+)/)
+      if (match) {
+        nextNumber = parseInt(match[1], 10) + 1
+      }
+    }
+    
+    return `RET-${currentYear}-${nextNumber.toString().padStart(6, '0')}`
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   const currentYearReturns = returns.filter(r => r.idRetur.startsWith(`RET-${currentYear}-`))
   
   let nextNumber = 1
@@ -270,7 +513,7 @@ export function generateReturnId(): string {
 /**
  * Creează un retur nou
  */
-export function createReturn(
+export async function createReturn(
   numarComanda: string,
   orderData: OrderData,
   products: Product[],
@@ -280,11 +523,54 @@ export function createReturn(
   pdfPath: string,
   qrCodeData: string,
   idRetur?: string
-): Return {
-  const returns = getReturns()
+): Promise<Return> {
+  const returnId = idRetur || await generateReturnId()
+  
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('returns')
+      .insert({
+        id_retur: returnId,
+        numar_comanda: numarComanda,
+        order_data: orderData,
+        products: products,
+        refund_data: refundData,
+        signature: signature,
+        total_refund: totalRefund,
+        status: 'INITIAT',
+        pdf_path: pdfPath,
+        qr_code_data: qrCodeData,
+      })
+      .select()
+      .single()
+    
+    if (error) {
+      throw new Error('Eroare la crearea returului: ' + error.message)
+    }
+    
+    return {
+      idRetur: data.id_retur,
+      numarComanda: data.numar_comanda,
+      orderData: data.order_data,
+      products: data.products,
+      refundData: data.refund_data,
+      signature: data.signature,
+      totalRefund: parseFloat(data.total_refund),
+      status: data.status,
+      createdAt: data.created_at,
+      pdfPath: data.pdf_path || '',
+      qrCodeData: data.qr_code_data || '',
+      awbNumber: data.awb_number,
+      shippingReceiptPhoto: data.shipping_receipt_photo,
+      packageLabelPhoto: data.package_label_photo,
+    }
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   
   const newReturn: Return = {
-    idRetur: idRetur || generateReturnId(),
+    idRetur: returnId,
     numarComanda,
     orderData,
     products,
@@ -306,16 +592,73 @@ export function createReturn(
 /**
  * Găsește un retur după ID
  */
-export function findReturnById(idRetur: string): Return | null {
-  const returns = getReturns()
+export async function findReturnById(idRetur: string): Promise<Return | null> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('returns')
+      .select('*')
+      .eq('id_retur', idRetur)
+      .single()
+    
+    if (error || !data) return null
+    
+    return {
+      idRetur: data.id_retur,
+      numarComanda: data.numar_comanda,
+      orderData: data.order_data,
+      products: data.products,
+      refundData: data.refund_data,
+      signature: data.signature,
+      totalRefund: parseFloat(data.total_refund),
+      status: data.status,
+      createdAt: data.created_at,
+      pdfPath: data.pdf_path || '',
+      qrCodeData: data.qr_code_data || '',
+      awbNumber: data.awb_number,
+      shippingReceiptPhoto: data.shipping_receipt_photo,
+      packageLabelPhoto: data.package_label_photo,
+    }
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   return returns.find(r => r.idRetur === idRetur) || null
 }
 
 /**
  * Actualizează statusul unui retur
  */
-export function updateReturnStatus(idRetur: string, status: Return['status']): Return | null {
-  const returns = getReturns()
+export async function updateReturnStatus(idRetur: string, status: Return['status']): Promise<Return | null> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('returns')
+      .update({ status })
+      .eq('id_retur', idRetur)
+      .select()
+      .single()
+    
+    if (error || !data) return null
+    
+    return {
+      idRetur: data.id_retur,
+      numarComanda: data.numar_comanda,
+      orderData: data.order_data,
+      products: data.products,
+      refundData: data.refund_data,
+      signature: data.signature,
+      totalRefund: parseFloat(data.total_refund),
+      status: data.status,
+      createdAt: data.created_at,
+      pdfPath: data.pdf_path || '',
+      qrCodeData: data.qr_code_data || '',
+      awbNumber: data.awb_number,
+      shippingReceiptPhoto: data.shipping_receipt_photo,
+      packageLabelPhoto: data.package_label_photo,
+    }
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   const returnIndex = returns.findIndex(r => r.idRetur === idRetur)
   
   if (returnIndex === -1) {
@@ -331,15 +674,25 @@ export function updateReturnStatus(idRetur: string, status: Return['status']): R
 /**
  * Anulează un retur
  */
-export function archiveReturn(idRetur: string): Return | null {
+export async function archiveReturn(idRetur: string): Promise<Return | null> {
   return updateReturnStatus(idRetur, 'ANULAT')
 }
 
 /**
  * Șterge un retur din baza de date
  */
-export function deleteReturn(idRetur: string): boolean {
-  const returns = getReturns()
+export async function deleteReturn(idRetur: string): Promise<boolean> {
+  if (supabase) {
+    const { error } = await supabase
+      .from('returns')
+      .delete()
+      .eq('id_retur', idRetur)
+    
+    return !error
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   const returnIndex = returns.findIndex(r => r.idRetur === idRetur)
   
   if (returnIndex === -1) {
@@ -366,13 +719,47 @@ export function deleteReturn(idRetur: string): boolean {
 /**
  * Actualizează documentele unui retur (AWB, poze)
  */
-export function updateReturnDocuments(
+export async function updateReturnDocuments(
   idRetur: string,
   awbNumber?: string,
   shippingReceiptPhoto?: string,
   packageLabelPhoto?: string
-): Return | null {
-  const returns = getReturns()
+): Promise<Return | null> {
+  if (supabase) {
+    const updates: any = {}
+    if (awbNumber !== undefined) updates.awb_number = awbNumber
+    if (shippingReceiptPhoto !== undefined) updates.shipping_receipt_photo = shippingReceiptPhoto
+    if (packageLabelPhoto !== undefined) updates.package_label_photo = packageLabelPhoto
+    
+    const { data, error } = await supabase
+      .from('returns')
+      .update(updates)
+      .eq('id_retur', idRetur)
+      .select()
+      .single()
+    
+    if (error || !data) return null
+    
+    return {
+      idRetur: data.id_retur,
+      numarComanda: data.numar_comanda,
+      orderData: data.order_data,
+      products: data.products,
+      refundData: data.refund_data,
+      signature: data.signature,
+      totalRefund: parseFloat(data.total_refund),
+      status: data.status,
+      createdAt: data.created_at,
+      pdfPath: data.pdf_path || '',
+      qrCodeData: data.qr_code_data || '',
+      awbNumber: data.awb_number,
+      shippingReceiptPhoto: data.shipping_receipt_photo,
+      packageLabelPhoto: data.package_label_photo,
+    }
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   const returnIndex = returns.findIndex(r => r.idRetur === idRetur)
   
   if (returnIndex === -1) {
@@ -397,7 +784,7 @@ export function updateReturnDocuments(
 /**
  * Actualizează complet un retur (toate câmpurile)
  */
-export function updateReturn(
+export async function updateReturn(
   idRetur: string,
   updates: Partial<{
     orderData: OrderData
@@ -409,8 +796,48 @@ export function updateReturn(
     shippingReceiptPhoto: string
     packageLabelPhoto: string
   }>
-): Return | null {
-  const returns = getReturns()
+): Promise<Return | null> {
+  if (supabase) {
+    const dbUpdates: any = {}
+    
+    if (updates.orderData !== undefined) dbUpdates.order_data = updates.orderData
+    if (updates.products !== undefined) dbUpdates.products = updates.products
+    if (updates.refundData !== undefined) dbUpdates.refund_data = updates.refundData
+    if (updates.totalRefund !== undefined) dbUpdates.total_refund = updates.totalRefund
+    if (updates.status !== undefined) dbUpdates.status = updates.status
+    if (updates.awbNumber !== undefined) dbUpdates.awb_number = updates.awbNumber
+    if (updates.shippingReceiptPhoto !== undefined) dbUpdates.shipping_receipt_photo = updates.shippingReceiptPhoto
+    if (updates.packageLabelPhoto !== undefined) dbUpdates.package_label_photo = updates.packageLabelPhoto
+    
+    const { data, error } = await supabase
+      .from('returns')
+      .update(dbUpdates)
+      .eq('id_retur', idRetur)
+      .select()
+      .single()
+    
+    if (error || !data) return null
+    
+    return {
+      idRetur: data.id_retur,
+      numarComanda: data.numar_comanda,
+      orderData: data.order_data,
+      products: data.products,
+      refundData: data.refund_data,
+      signature: data.signature,
+      totalRefund: parseFloat(data.total_refund),
+      status: data.status,
+      createdAt: data.created_at,
+      pdfPath: data.pdf_path || '',
+      qrCodeData: data.qr_code_data || '',
+      awbNumber: data.awb_number,
+      shippingReceiptPhoto: data.shipping_receipt_photo,
+      packageLabelPhoto: data.package_label_photo,
+    }
+  }
+  
+  // Fallback la JSON
+  const returns = await getReturns()
   const returnIndex = returns.findIndex(r => r.idRetur === idRetur)
   
   if (returnIndex === -1) {

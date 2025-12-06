@@ -16,7 +16,7 @@ export async function GET() {
       )
     }
 
-    const config = getConfig()
+    const config = await getConfig()
     
     // Nu returnăm token-ul complet din motive de securitate
     return NextResponse.json({
@@ -57,11 +57,11 @@ export async function POST(request: NextRequest) {
     const { shopify, excludedSKUs } = body
 
     // Obține configurația existentă pentru a păstra datele
-    const currentConfig = getConfig()
+    const currentConfig = await getConfig()
 
     if (shopify) {
       // Păstrează datele existente dacă nu sunt furnizate noi valori
-      updateShopifyConfig({
+      await updateShopifyConfig({
         domain: shopify.domain || currentConfig.shopify.domain || '',
         accessToken: shopify.accessToken || currentConfig.shopify.accessToken || '',
         shopTitle: shopify.shopTitle || currentConfig.shopify.shopTitle || '',
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (excludedSKUs !== undefined) {
-      updateExcludedSKUs(excludedSKUs)
+      await updateExcludedSKUs(excludedSKUs)
     }
 
     return NextResponse.json({

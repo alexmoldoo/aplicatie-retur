@@ -9,30 +9,20 @@
   --input-border: #e0e0e0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-primary: #2d2d2d;
-    --bg-secondary: #3d3d3d;
-    --bg-tertiary: #3d3d3d;
-    --text-primary: #e0e0e0;
-    --text-secondary: #b0b0b0;
-    --border-color: #555;
-    --input-bg: #3d3d3d;
-    --input-border: #555;
-  }
-  
-  body {
-    background: linear-gradient(180deg, #1a1a1a 0%, #2d2d2d 100%);
-  }
-}
-
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 body {
+  overflow-x: hidden;
+  max-width: 100vw;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
@@ -55,21 +45,35 @@ body {
 /* Responsive pentru telefon (până la 480px) */
 @media (max-width: 480px) {
   body {
-    padding: 10px;
+    padding: 15px;
+    align-items: flex-start;
+    padding-top: 15px;
+  }
+  
+  #__next {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0;
+  }
+  
+  main {
+    width: 100% !important;
+    padding: 0;
+    margin: 0;
   }
 }
 
 /* Responsive pentru tabletă (481px - 768px) */
 @media (min-width: 481px) and (max-width: 768px) {
   body {
-    padding: 15px;
+    padding: 10px;
   }
 }
 
 /* Responsive pentru laptop/desktop (peste 768px) */
 @media (min-width: 769px) {
   body {
-    padding: 20px;
+    padding: 10px;
   }
 }
 
@@ -143,15 +147,25 @@ body {
 }
 
 .return-container {
-  padding: 20px;
+  padding: 15px;
   min-height: 400px;
   background-color: var(--bg-primary);
   color: var(--text-primary);
 }
 
+@media (max-width: 480px) {
+  .return-container {
+    padding: 15px;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    border-radius: 12px;
+  }
+}
+
 @media (min-width: 481px) {
   .return-container {
-    padding: 30px;
+    padding: 20px;
     min-height: 500px;
   }
 }
@@ -163,62 +177,3 @@ body {
   }
 }
 
-/* Dark mode support pentru input-uri - fără !important */
-@media (prefers-color-scheme: dark) {
-  input[type="text"],
-  input[type="email"],
-  input[type="number"],
-  input[type="tel"],
-  textarea,
-  select {
-    background-color: var(--input-bg);
-    color: var(--text-primary);
-    border-color: var(--input-border);
-  }
-  
-  input[type="text"]:focus,
-  input[type="email"]:focus,
-  input[type="number"]:focus,
-  input[type="tel"]:focus,
-  textarea:focus,
-  select:focus {
-    border-color: #26a69a;
-    background-color: var(--input-bg);
-  }
-  
-  input[type="text"]:disabled,
-  input[type="email"]:disabled,
-  input[type="number"]:disabled,
-  input[type="tel"]:disabled,
-  textarea:disabled,
-  select:disabled {
-    background-color: var(--bg-secondary);
-    color: var(--text-secondary);
-    opacity: 0.6;
-  }
-  
-  table {
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-  }
-  
-  thead {
-    background-color: var(--bg-secondary);
-  }
-  
-  tbody tr {
-    background-color: var(--bg-primary);
-  }
-  
-  tbody tr:hover {
-    background-color: var(--bg-secondary);
-  }
-  
-  label {
-    color: var(--text-primary);
-  }
-  
-  p, h1, h2, h3, h4, h5, h6 {
-    color: var(--text-primary);
-  }
-}

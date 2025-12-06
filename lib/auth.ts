@@ -84,7 +84,7 @@ export async function getCurrentUser(): Promise<User | null> {
     return null
   }
   
-  return findUserById(session.userId)
+  return await findUserById(session.userId)
 }
 
 /**
@@ -99,7 +99,7 @@ export async function isAuthenticated(): Promise<boolean> {
  * Autentifică un utilizator
  */
 export async function authenticate(email: string, password: string): Promise<User | null> {
-  const user = findUserByEmail(email)
+  const user = await findUserByEmail(email)
   
   if (!user) {
     return null
