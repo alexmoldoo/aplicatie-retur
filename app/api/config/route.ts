@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import { getConfig, updateShopifyConfig, updateExcludedSKUs } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET - Obține configurația
  */

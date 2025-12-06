@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { updateReturnStatus } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * PATCH - Actualizează statusul unui retur
  */

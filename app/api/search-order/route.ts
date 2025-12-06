@@ -9,6 +9,8 @@ import { calculateEligibility } from '@/lib/eligibility'
 import { getConfig } from '@/lib/db'
 import { matchNames } from '@/lib/name-matcher'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * API Route pentru căutarea comenzilor în Shopify
  * Validare strictă: nume+prenume obligatoriu, număr comandă SAU telefon SAU email obligatoriu

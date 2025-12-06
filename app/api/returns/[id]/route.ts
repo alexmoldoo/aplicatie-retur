@@ -4,6 +4,8 @@ import { findReturnById, deleteReturn } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import fs from 'fs'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET - Obține detalii despre un retur specific
  */

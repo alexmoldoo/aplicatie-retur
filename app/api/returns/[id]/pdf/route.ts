@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { findReturnById } from '@/lib/db'
 import fs from 'fs'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET - Descarcă PDF-ul unui retur
  */

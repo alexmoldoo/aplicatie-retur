@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { getSessionFromCookies } from '@/lib/auth'
 import { findUserById } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   try {
     const cookieStore = await cookies()

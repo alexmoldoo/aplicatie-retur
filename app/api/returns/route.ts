@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { getReturns } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET - Obține lista tuturor retururilor
  */

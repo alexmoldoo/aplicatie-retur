@@ -5,6 +5,8 @@ import { generateReturnPDF } from '@/lib/pdf-generator'
 import fs from 'fs'
 import path from 'path'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()

@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { updateReturnDocuments } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * POST - Actualizează documentele unui retur (AWB, poze)
  */
