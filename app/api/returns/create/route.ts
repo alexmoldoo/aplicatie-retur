@@ -1,40 +1,136 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createReturn, OrderData, Product, RefundData, generateReturnId } from '@/lib/db'
+import { createReturn, updateReturnDocuments, OrderData, Product, RefundData, generateReturnId } from '@/lib/db'
 import { generateQRCode } from '@/lib/qrcode-generator'
 import { generateReturnPDF } from '@/lib/pdf-generator'
+import { verifyCustomerToken } from '@/lib/customer-session'
+import { logAudit } from '@/lib/audit'
+import { getClientIp, makeRateLimiter, isAllowedOrigin, formatWaitTime } from '@/lib/security'
+import { isBlocked, recordFail } from '@/lib/ip-blocklist'
+import { createReturnAWB } from '@/lib/sameday'
 import fs from 'fs'
 import path from 'path'
 
 export const dynamic = 'force-dynamic'
 
+// Max 3 retururi / oră / IP — prevenția spam
+const checkRateLimit = makeRateLimiter({ max: 3, windowMs: 60 * 60_000 })
+
 export async function POST(request: NextRequest) {
+  const ip = getClientIp(request)
+
   try {
+    // 0. Verifică dacă IP-ul e blocat (după prea multe eșecuri în trecut)
+    const block = isBlocked(ip)
+    if (block.blocked) {
+      await logAudit({ action: 'create_return_rate_limited', ip, details: { reason: 'ip_blocked', retryAfter: block.retryAfterSeconds } })
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'Acces temporar blocat din cauza prea multor încercări eșuate. Te rugăm să contactezi suportul dacă ai nevoie de ajutor.',
+        },
+        { status: 429, headers: { 'Retry-After': String(block.retryAfterSeconds || 0) } }
+      )
+    }
+
+    // 1. Verificare origin (CSRF light) — refuză apeluri din afara domeniului
+    if (!isAllowedOrigin(request)) {
+      recordFail(ip)
+      await logAudit({ action: 'create_return_origin_blocked', ip })
+      return NextResponse.json(
+        { success: false, message: 'Acces refuzat.' },
+        { status: 403 }
+      )
+    }
+
+    // 2. Rate limit per IP
+    const rl = checkRateLimit(ip)
+    if (!rl.allowed) {
+      await logAudit({ action: 'create_return_rate_limited', ip, details: { retryAfter: rl.retryAfter } })
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Prea multe retururi în scurt timp. Te rugăm să aștepți ${formatWaitTime(rl.retryAfter)} înainte să încerci din nou.`,
+        },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } }
+      )
+    }
+
     const body = await request.json()
     const {
       orderData,
       products,
       refundData,
       signature,
+      sessionToken,
     }: {
       orderData: OrderData
       products: Product[]
       refundData: RefundData
       signature: string
+      sessionToken?: string
     } = body
 
-    // Validare date
-    if (!orderData || !products || !refundData || !signature) {
+    // 3. Verificare token de sesiune (emis în Pas 1)
+    const session = verifyCustomerToken(sessionToken)
+    if (!session) {
+      recordFail(ip)
+      await logAudit({
+        action: 'create_return_invalid_token',
+        ip,
+        details: { hadToken: !!sessionToken, claimedOrder: orderData?.numarComanda },
+      })
       return NextResponse.json(
-        { success: false, message: 'Missing required data' },
+        {
+          success: false,
+          message: 'Sesiune invalidă sau expirată. Te rugăm să reiei procesul de la pasul 1.',
+        },
+        { status: 401 }
+      )
+    }
+
+    // 4. Verificare că tokenul corespunde comenzii din payload
+    if (orderData?.numarComanda !== session.numarComanda) {
+      recordFail(ip)
+      await logAudit({
+        action: 'create_return_invalid_token',
+        ip,
+        details: { reason: 'order_mismatch', tokenOrder: session.numarComanda, payloadOrder: orderData?.numarComanda },
+      })
+      return NextResponse.json(
+        { success: false, message: 'Datele comenzii nu corespund cu sesiunea. Te rugăm să reiei procesul.' },
+        { status: 401 }
+      )
+    }
+
+    // 5. Validare date
+    if (!orderData || !products || !refundData || !signature) {
+      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_data' } })
+      return NextResponse.json(
+        { success: false, message: 'Date incomplete.' },
         { status: 400 }
       )
     }
 
-    // Calculare suma totală de returnat
-    const totalRefund = products.reduce((sum, p) => {
+    // Calculare subtotal produse (fără cost transport)
+    const subtotalProduse = products.reduce((sum, p) => {
       const cantitateReturnata = p.cantitateReturnata || (p.selected ? p.cantitate : 0)
       return sum + (p.pret * cantitateReturnata)
     }, 0)
+
+    // Validare metoda de trimitere + cost transport
+    const metodaTrimitere = refundData.metodaTrimitere
+    const costTransport = typeof refundData.costTransport === 'number' ? refundData.costTransport : 0
+
+    if (!metodaTrimitere) {
+      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_shipping_method' } })
+      return NextResponse.json(
+        { success: false, message: 'Metoda de trimitere lipsește.' },
+        { status: 400 }
+      )
+    }
+
+    // Total final după deducerea costului de transport
+    const totalRefund = Math.max(0, subtotalProduse - costTransport)
 
     // Generează ID retur
     const idRetur = await generateReturnId()
@@ -54,9 +150,93 @@ export async function POST(request: NextRequest) {
     }
 
     // Pregătește refundData doar cu IBAN și numeTitular (fără metodaRambursare)
+    // + datele de expediere alese în Pas 5
     const refundDataForReturn: RefundData = {
       iban: refundData.iban,
       numeTitular: refundData.numeTitular,
+      metodaTrimitere,
+      costTransport,
+      subtotalProduse,
+    }
+
+    // Generează AWB SameDay (doar pentru curier la adresă)
+    // Folosim adresa de livrare din comanda Shopify (orderContact) ca adresă de pickup.
+    // Dacă lipsește vreun câmp esențial sau API-ul SameDay eșuează, întoarcem 502
+    // ca să vadă clientul și să poată reîncerca / contacta suportul (în loc să generăm
+    // un retur fără AWB, care ar fi invizibil pentru ei).
+    let awbNumber: string | undefined
+    let awbPdfUrl: string | null = null
+    if (metodaTrimitere === 'curier') {
+      const pickupContact = (body as {
+        orderContact?: {
+          nume?: string
+          telefon?: string
+          oras?: string
+          judet?: string
+          strada?: string
+          codPostal?: string
+          email?: string
+        }
+      }).orderContact || {}
+
+      const missing: string[] = []
+      if (!pickupContact.telefon) missing.push('telefon')
+      if (!pickupContact.strada) missing.push('stradă')
+      if (!pickupContact.oras) missing.push('oraș')
+      if (!pickupContact.judet) missing.push('județ')
+      if (missing.length > 0) {
+        await logAudit({
+          action: 'create_return_awb_fail',
+          ip,
+          details: { returnId: idRetur, reason: 'missing_pickup_address', missing },
+        })
+        return NextResponse.json(
+          {
+            success: false,
+            message: `Nu putem genera AWB-ul SameDay — lipsesc datele de adresă din comandă: ${missing.join(', ')}. Te rugăm să alegi „trimit eu cu un curier ales" sau să contactezi suportul.`,
+            missingFields: missing,
+          },
+          { status: 400 }
+        )
+      }
+
+      try {
+        const awbResult = await createReturnAWB({
+          pickupAddress: {
+            name: pickupContact.nume || orderData.nume,
+            phone: pickupContact.telefon || '',
+            city: pickupContact.oras || '',
+            county: pickupContact.judet || '',
+            street: pickupContact.strada || '',
+            postalCode: pickupContact.codPostal,
+            email: pickupContact.email,
+          },
+          packageInfo: { weight: 1, observation: `Retur ${idRetur}` },
+          reference: idRetur,
+        })
+        awbNumber = awbResult.awbNumber
+        awbPdfUrl = awbResult.awbPdfUrl
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : 'unknown'
+        console.error('SameDay AWB generation failed:', errMsg)
+        await logAudit({
+          action: 'create_return_awb_fail',
+          ip,
+          details: { returnId: idRetur, error: errMsg },
+        })
+        // Detaliile tehnice (cu stack/credentials/config) rămân în loguri.
+        // Către client expunem doar dacă e un mesaj de la API SameDay (HTTP 4xx/5xx).
+        const isApiError = /^SameDay /.test(errMsg) && !/lipsesc din env/.test(errMsg)
+        return NextResponse.json(
+          {
+            success: false,
+            message: isApiError
+              ? `SameDay a refuzat AWB-ul: ${errMsg.replace(/^SameDay [^:]+:\s*/, '')}`
+              : 'Curierul SameDay nu este disponibil momentan. Te rugăm să alegi „trimit eu cu un curier ales" sau să contactezi suportul.',
+          },
+          { status: 502 }
+        )
+      }
     }
 
     // Creează returul temporar pentru generare PDF
@@ -72,6 +252,7 @@ export async function POST(request: NextRequest) {
       createdAt: new Date().toISOString(),
       pdfPath: '',
       qrCodeData: qrCodeDataUrl,
+      awbNumber,
     }
 
     // Generează PDF
@@ -100,11 +281,35 @@ export async function POST(request: NextRequest) {
       idRetur
     )
 
+    // Salvează AWB-ul (dacă a fost generat) pe rândul de retur
+    if (awbNumber) {
+      try {
+        await updateReturnDocuments(newReturn.idRetur, awbNumber)
+        newReturn.awbNumber = awbNumber
+      } catch (e) {
+        console.error('Failed to persist AWB number:', e)
+      }
+    }
+
+    await logAudit({
+      action: 'create_return_success',
+      ip,
+      details: {
+        returnId: newReturn.idRetur,
+        numarComanda: newReturn.numarComanda,
+        totalRefund: newReturn.totalRefund,
+        metodaTrimitere,
+        awbNumber: awbNumber || null,
+      },
+    })
+
     // Returnează răspuns cu datele necesare
     return NextResponse.json({
       success: true,
       returnId: newReturn.idRetur,
       pdfPath: `/api/returns/${newReturn.idRetur}/pdf`,
+      awbNumber: awbNumber || null,
+      awbPdfUrl,
       returnData: {
         idRetur: newReturn.idRetur,
         numarComanda: newReturn.numarComanda,
@@ -114,6 +319,11 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error creating return:', error)
+    await logAudit({
+      action: 'create_return_fail',
+      ip,
+      details: { reason: 'exception', error: error instanceof Error ? error.message : 'unknown' },
+    })
     return NextResponse.json(
       {
         success: false,

@@ -1,212 +1,689 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { Product, ShippingAddress } from './ReturnProcess'
 
 interface InformationStepProps {
-  onSubmit: () => void
+  onSubmit: (shippingInfo: {
+    metodaTrimitere: 'curier' | 'manual'
+    costTransport: number
+    pickupContact?: ShippingAddress & { email?: string }
+  }) => void
   onBack: () => void
+  products: Product[]
+  initialShipping?: ShippingAddress
+  customerEmail?: string
 }
 
-export default function InformationStep({ onSubmit, onBack }: InformationStepProps) {
-  const [hasRead, setHasRead] = useState(false)
-  const [scrollPosition, setScrollPosition] = useState(0)
+interface AdresaRetur {
+  companie: string
+  strada: string
+  oras: string
+  judet: string
+  codPostal: string
+  tara: string
+  telefon: string
+}
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget
-    const scrollTop = target.scrollTop
-    const scrollHeight = target.scrollHeight
-    const clientHeight = target.clientHeight
-    
-    const scrolled = (scrollTop / (scrollHeight - clientHeight)) * 100
-    setScrollPosition(scrolled)
-    
-    // Consideră că a citit dacă a scrollat până la 95%
-    if (scrolled >= 95) {
-      setHasRead(true)
+interface TransportCosts {
+  curier: number
+}
+
+const FALLBACK_ADRESA: AdresaRetur = {
+  companie: 'RED MAXARI',
+  strada: 'Șoseaua Sibiului, nr. 11',
+  oras: 'Mediaș',
+  judet: 'Sibiu',
+  codPostal: '551129',
+  tara: 'România',
+  telefon: '+40770404859',
+}
+const FALLBACK_COSTS: TransportCosts = { curier: 19.99 }
+
+type Metoda = 'curier' | 'manual' | null
+
+export default function InformationStep({ onSubmit, onBack, products, initialShipping, customerEmail }: InformationStepProps) {
+  const [adresa, setAdresa] = useState<AdresaRetur>(FALLBACK_ADRESA)
+  const [costuri, setCosturi] = useState<TransportCosts>(FALLBACK_COSTS)
+  const [metoda, setMetoda] = useState<Metoda>(null)
+  const [accept, setAccept] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  // Adresa de pickup — pre-completată din comanda Shopify, editabilă de client
+  const [pickup, setPickup] = useState({
+    nume: initialShipping?.nume || '',
+    telefon: initialShipping?.telefon || '',
+    email: customerEmail || '',
+    strada: initialShipping?.strada || '',
+    oras: initialShipping?.oras || '',
+    judet: initialShipping?.judet || '',
+    codPostal: initialShipping?.codPostal || '',
+    tara: initialShipping?.tara || 'România',
+  })
+
+  const updatePickup = (field: keyof typeof pickup, value: string) => {
+    setPickup(prev => ({ ...prev, [field]: value }))
+  }
+
+  useEffect(() => {
+    fetch('/api/config/return-info')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          if (d.adresaRetur) setAdresa(d.adresaRetur)
+          if (d.transportCosts?.curier != null) {
+            setCosturi({ curier: d.transportCosts.curier })
+          }
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const subtotal = products
+    .filter(p => p.selected && (p.cantitateReturnata || 0) > 0)
+    .reduce((sum, p) => sum + p.pret * (p.cantitateReturnata || 0), 0)
+
+  const cost = metoda === 'curier' ? costuri.curier : 0
+  const totalRefund = Math.max(0, subtotal - cost)
+
+  const handleCopyAdresa = async () => {
+    const text = `${adresa.companie}\n${adresa.strada}\n${adresa.oras}, ${adresa.judet} ${adresa.codPostal}\n${adresa.tara}\nTel: ${adresa.telefon}`
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // ignore
     }
   }
 
+  const handleContinue = () => {
+    setError(null)
+    if (!metoda) {
+      setError('Alege o metodă de trimitere a coletului.')
+      return
+    }
+    if (!accept) {
+      setError('Trebuie să confirmi că ai citit informațiile.')
+      return
+    }
+
+    let pickupContact: (ShippingAddress & { email?: string }) | undefined
+    if (metoda === 'curier') {
+      const missing: string[] = []
+      if (!pickup.nume.trim()) missing.push('nume')
+      if (!pickup.telefon.trim()) missing.push('telefon')
+      if (!pickup.email.trim()) missing.push('email')
+      if (!pickup.strada.trim() || pickup.strada.trim().length < 3) missing.push('stradă')
+      if (!pickup.oras.trim()) missing.push('oraș')
+      if (!pickup.judet.trim()) missing.push('județ')
+      if (!pickup.codPostal.trim()) missing.push('cod poștal')
+      if (missing.length > 0) {
+        setError(`Completează adresa de ridicare: ${missing.join(', ')}.`)
+        return
+      }
+      pickupContact = {
+        nume: pickup.nume.trim(),
+        telefon: pickup.telefon.trim(),
+        email: pickup.email.trim(),
+        strada: pickup.strada.trim(),
+        oras: pickup.oras.trim(),
+        judet: pickup.judet.trim(),
+        codPostal: pickup.codPostal.trim(),
+        tara: pickup.tara.trim() || 'România',
+      }
+    }
+
+    onSubmit({
+      metodaTrimitere: metoda,
+      costTransport: cost,
+      pickupContact,
+    })
+  }
+
   return (
-    <div className="step-container-large">
-      <h2 style={{
-        fontSize: '24px',
-        fontWeight: 'bold',
-        marginBottom: '20px',
-        textAlign: 'center'
-      }}>
-        Informații importante despre retur
-      </h2>
-
-      <div
-        onScroll={handleScroll}
-        style={{
-          maxHeight: '400px',
-          overflowY: 'auto',
-          padding: '20px',
-          backgroundColor: '#f9f9f9',
-          borderRadius: '12px',
-          border: '1px solid #e0e0e0',
-          marginBottom: '20px',
-          lineHeight: '1.6'
-        }}
-      >
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '10px', color: '#26a69a' }}>
-            Pașii pentru retur
-          </h3>
-          <ol style={{ paddingLeft: '20px' }}>
-            <li style={{ marginBottom: '8px' }}>Selectați produsele pe care doriți să le returnați</li>
-            <li style={{ marginBottom: '8px' }}>Indicați motivul returului pentru fiecare produs</li>
-            <li style={{ marginBottom: '8px' }}>Completați datele pentru rambursare</li>
-            <li style={{ marginBottom: '8px' }}>Încărcați documentele necesare</li>
-            <li style={{ marginBottom: '8px' }}>Trimiteți cererea de retur</li>
-          </ol>
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '10px', color: '#26a69a' }}>
-            Condiții de eligibilitate
-          </h3>
-          <ul style={{ paddingLeft: '20px' }}>
-            <li style={{ marginBottom: '8px' }}>Produsele trebuie să fie returnate în termen de 15 zile de la primire</li>
-            <li style={{ marginBottom: '8px' }}>Produsele trebuie să fie în stare originală, nefolosite</li>
-            <li style={{ marginBottom: '8px' }}>Etichetele și ambalajul original trebuie să fie intacte</li>
-            <li style={{ marginBottom: '8px' }}>Unele produse nu pot fi returnate (verificați lista de SKU-uri excluse)</li>
-          </ul>
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '10px', color: '#26a69a' }}>
-            Metode de rambursare
-          </h3>
-          <p style={{ marginBottom: '10px' }}>
-            Rambursarea se poate face prin:
-          </p>
-          <ul style={{ paddingLeft: '20px' }}>
-            <li style={{ marginBottom: '8px' }}><strong>Cont bancar:</strong> IBAN valid românesc</li>
-            <li style={{ marginBottom: '8px' }}><strong>Card:</strong> Dacă comanda a fost plătită cu cardul</li>
-          </ul>
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '10px', color: '#26a69a' }}>
-            Documente necesare
-          </h3>
-          <ul style={{ paddingLeft: '20px' }}>
-            <li style={{ marginBottom: '8px' }}>Factura originală sau copie</li>
-            <li style={{ marginBottom: '8px' }}>Formularul de retur completat</li>
-            <li style={{ marginBottom: '8px' }}>Dovada de expediere (după trimiterea coletului)</li>
-          </ul>
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '10px', color: '#26a69a' }}>
-            Timp de procesare
-          </h3>
-          <p>
-            După primirea coletului, procesarea returului durează între 5-10 zile lucrătoare. 
-            Rambursarea va fi efectuată în contul indicat în termen de 14 zile de la aprobarea returului.
-          </p>
-        </div>
-
-        <div style={{ 
-          marginTop: '30px',
-          padding: '15px',
-          backgroundColor: '#fff3cd',
-          borderRadius: '8px',
-          border: '1px solid #ffc107'
-        }}>
-          <p style={{ margin: 0, fontWeight: 'bold', color: '#856404' }}>
-            ⚠️ Important: Vă rugăm să citiți toate informațiile de mai sus înainte de a continua.
-          </p>
-        </div>
-      </div>
-
-      {/* Indicator de progres */}
-      <div style={{
-        marginBottom: '20px',
-        textAlign: 'center'
-      }}>
-        <div style={{
-          width: '100%',
-          height: '6px',
-          backgroundColor: '#e0e0e0',
-          borderRadius: '3px',
-          overflow: 'hidden',
-          marginBottom: '8px'
-        }}>
-          <div style={{
-            width: `${scrollPosition}%`,
-            height: '100%',
-            backgroundColor: '#26a69a',
-            transition: 'width 0.3s ease'
-          }} />
-        </div>
-        <p style={{ fontSize: '12px', color: '#666' }}>
-          {scrollPosition >= 95 ? '✓ Ați citit toate informațiile' : `Progres: ${Math.round(scrollPosition)}%`}
+    <div className="is-form step-form-large">
+      <div className="is-header">
+        <div className="is-header-icon" aria-hidden="true">📦</div>
+        <h2 className="is-title">Cum trimiți coletul</h2>
+        <p className="is-subtitle">
+          Coletul îl trimiți tu către noi. Alege metoda care ți se potrivește.
         </p>
       </div>
+
+      {error && (
+        <div className="is-error" role="alert">
+          <span aria-hidden="true">⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Adresa de retur */}
+      <div className="is-card">
+        <div className="is-card-head">
+          <h3 className="is-card-title">📍 Adresa de retur</h3>
+          <button type="button" onClick={handleCopyAdresa} className="is-copy-btn">
+            {copied ? '✓ Copiat' : 'Copiază'}
+          </button>
+        </div>
+        <div className="is-address">
+          <div className="is-address-line is-address-name">{adresa.companie}</div>
+          <div className="is-address-line">{adresa.strada}</div>
+          <div className="is-address-line">{adresa.oras}, {adresa.judet} {adresa.codPostal}</div>
+          <div className="is-address-line">{adresa.tara}</div>
+          <div className="is-address-line is-address-phone">📞 {adresa.telefon}</div>
+        </div>
+      </div>
+
+      {/* Pregătește coletul */}
+      <div className="is-card">
+        <h3 className="is-card-title">📦 Pregătește coletul</h3>
+        <ul className="is-checklist">
+          <li>Produsele în starea originală, cu etichetele intacte</li>
+          <li>Include în colet formularul de retur (PDF) descărcat la pasul următor</li>
+          <li>Ambalează atent ca produsele să nu se deterioreze pe drum</li>
+        </ul>
+      </div>
+
+      {/* Cum trimiți */}
+      <div className="is-card">
+        <h3 className="is-card-title">🚚 Cum trimiți coletul</h3>
+        <p className="is-card-text">Alege metoda — costul se scade direct din suma rambursată.</p>
+
+        <div className="is-methods">
+          {/* Curier */}
+          <label className={`is-method ${metoda === 'curier' ? 'is-method-active' : ''}`}>
+            <input
+              type="radio"
+              name="metodaTrimitere"
+              checked={metoda === 'curier'}
+              onChange={() => setMetoda('curier')}
+              className="is-method-radio"
+            />
+            <div className="is-method-body">
+              <div className="is-method-head">
+                <span className="is-method-icon">🏠</span>
+                <span className="is-method-title">Curier la adresă</span>
+                <span className="is-method-cost">−{costuri.curier.toFixed(2)} RON</span>
+              </div>
+              <p className="is-method-text">
+                Curierul SameDay vine să ridice coletul de la adresa ta. Doar îl predai.
+              </p>
+            </div>
+          </label>
+
+          {/* Formular adresă pickup — afișat doar când curier */}
+          {metoda === 'curier' && (
+            <div className="is-pickup-form">
+              <div className="is-pickup-head">
+                <span className="is-pickup-title">📍 Adresa de unde ridicăm coletul</span>
+                <span className="is-pickup-hint">Pre-completată din comandă — modifică dacă e nevoie</span>
+              </div>
+              <div className="is-pickup-grid">
+                <label className="is-pickup-field">
+                  <span>Nume complet</span>
+                  <input type="text" value={pickup.nume} onChange={e => updatePickup('nume', e.target.value)} placeholder="Ion Popescu" />
+                </label>
+                <label className="is-pickup-field">
+                  <span>Telefon</span>
+                  <input type="tel" value={pickup.telefon} onChange={e => updatePickup('telefon', e.target.value)} placeholder="07xx xxx xxx" />
+                </label>
+                <label className="is-pickup-field is-pickup-field-full">
+                  <span>Email</span>
+                  <input type="email" value={pickup.email} onChange={e => updatePickup('email', e.target.value)} placeholder="email@exemplu.ro" />
+                </label>
+                <label className="is-pickup-field is-pickup-field-full">
+                  <span>Stradă, număr, bloc, scară, ap</span>
+                  <input type="text" value={pickup.strada} onChange={e => updatePickup('strada', e.target.value)} placeholder="Str. Mihai Eminescu nr. 25, bl. A1, ap. 12" />
+                </label>
+                <label className="is-pickup-field">
+                  <span>Oraș</span>
+                  <input type="text" value={pickup.oras} onChange={e => updatePickup('oras', e.target.value)} placeholder="Cluj-Napoca" />
+                </label>
+                <label className="is-pickup-field">
+                  <span>Județ</span>
+                  <input type="text" value={pickup.judet} onChange={e => updatePickup('judet', e.target.value)} placeholder="Cluj" />
+                </label>
+                <label className="is-pickup-field">
+                  <span>Cod poștal</span>
+                  <input type="text" value={pickup.codPostal} onChange={e => updatePickup('codPostal', e.target.value)} placeholder="400123" />
+                </label>
+              </div>
+              <p className="is-pickup-note">
+                Curierul SameDay va veni la adresa de mai sus în 1–2 zile lucrătoare. Ai grijă să fii acasă sau să predai coletul cuiva — eticheta o aduce curierul, tu doar o lipești pe colet.
+              </p>
+            </div>
+          )}
+
+          {/* Manual */}
+          <label className={`is-method ${metoda === 'manual' ? 'is-method-active' : ''}`}>
+            <input
+              type="radio"
+              name="metodaTrimitere"
+              checked={metoda === 'manual'}
+              onChange={() => setMetoda('manual')}
+              className="is-method-radio"
+            />
+            <div className="is-method-body">
+              <div className="is-method-head">
+                <span className="is-method-icon">📮</span>
+                <span className="is-method-title">Trimit eu cu un curier ales de mine</span>
+                <span className="is-method-cost is-method-free">Refund integral</span>
+              </div>
+              <p className="is-method-text">
+                Alegi orice curier și plătești expedierea direct la el. Primești toți banii înapoi.
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      {/* Rezumat refund */}
+      <div className="is-summary">
+        <div className="is-summary-row">
+          <span>Subtotal produse</span>
+          <span>{subtotal.toFixed(2)} RON</span>
+        </div>
+        <div className="is-summary-row">
+          <span>Cost transport</span>
+          <span className={cost > 0 ? 'is-summary-cost' : ''}>
+            {cost > 0 ? `−${cost.toFixed(2)} RON` : '0,00 RON'}
+          </span>
+        </div>
+        <div className="is-summary-total">
+          <span>Total rambursare</span>
+          <span className="is-summary-total-value">{totalRefund.toFixed(2)} RON</span>
+        </div>
+      </div>
+
+      {/* Confirmare citire */}
+      <label className="is-accept">
+        <input
+          type="checkbox"
+          checked={accept}
+          onChange={e => setAccept(e.target.checked)}
+          className="is-accept-checkbox"
+        />
+        <span>Am citit informațiile de mai sus și înțeleg cum trimit coletul.</span>
+      </label>
 
       {/* Butoane */}
-      <div style={{
-        display: 'flex',
-        gap: '12px',
-        justifyContent: 'space-between'
-      }}>
-        <button
-          onClick={onBack}
-          style={{
-            flex: 1,
-            padding: '14px',
-            borderRadius: '8px',
-            backgroundColor: '#e0e0e0',
-            color: '#333',
-            border: 'none',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            transition: 'background-color 0.3s ease'
-          }}
-          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#d0d0d0'}
-          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#e0e0e0'}
-        >
-          ÎNAPOI
-        </button>
-        <button
-          onClick={onSubmit}
-          disabled={!hasRead}
-          style={{
-            flex: 1,
-            padding: '14px',
-            borderRadius: '8px',
-            background: hasRead 
-              ? 'linear-gradient(90deg, #2196F3 0%, #4CAF50 100%)'
-              : '#ccc',
-            color: '#fff',
-            border: 'none',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            textTransform: 'uppercase',
-            cursor: hasRead ? 'pointer' : 'not-allowed',
-            opacity: hasRead ? 1 : 0.6,
-            transition: 'all 0.3s ease'
-          }}
-        >
+      <div className="is-actions">
+        <button type="button" onClick={onBack} className="is-back">ÎNAPOI</button>
+        <button type="button" onClick={handleContinue} className="is-cta">
           CONTINUĂ
+          <span className="is-cta-arrow" aria-hidden="true">→</span>
         </button>
       </div>
 
-      {!hasRead && (
-        <p style={{
-          textAlign: 'center',
-          fontSize: '12px',
-          color: '#f44336',
-          marginTop: '10px'
-        }}>
-          Vă rugăm să citiți toate informațiile pentru a continua
-        </p>
-      )}
+      <style jsx>{`
+        .is-form {
+          max-width: 600px;
+          margin: 0 auto;
+        }
+        .is-header {
+          text-align: center;
+          margin-bottom: 24px;
+        }
+        .is-header-icon { font-size: 40px; margin-bottom: 8px; }
+        .is-title {
+          font-size: 22px;
+          font-weight: 700;
+          color: #1a1a1a;
+          margin: 0 0 6px 0;
+          letter-spacing: -0.02em;
+        }
+        .is-subtitle { font-size: 14px; color: #6b7280; margin: 0; }
+        @media (min-width: 481px) {
+          .is-title { font-size: 26px; }
+          .is-subtitle { font-size: 15px; }
+        }
+
+        .is-error {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          padding: 12px 14px;
+          background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
+          border: 1px solid #fecaca;
+          border-radius: 10px;
+          color: #b91c1c;
+          font-size: 14px;
+          line-height: 1.5;
+          margin-bottom: 12px;
+          animation: is-fadein 0.3s ease;
+        }
+
+        .is-card {
+          padding: 18px;
+          background: #fafafa;
+          border: 1px solid #f0f0f0;
+          border-radius: 12px;
+          margin-bottom: 18px;
+        }
+        .is-card-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+          gap: 12px;
+        }
+        .is-card-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #374151;
+          margin: 0 0 8px 0;
+          letter-spacing: 0.01em;
+        }
+        .is-card-head .is-card-title { margin: 0; }
+        .is-card-text {
+          font-size: 13px;
+          color: #6b7280;
+          margin: 0 0 14px 0;
+        }
+        .is-copy-btn {
+          padding: 6px 12px;
+          border-radius: 8px;
+          background: #fff;
+          border: 1px solid #d1d5db;
+          color: #374151;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .is-copy-btn:hover {
+          background: #f3f4f6;
+          border-color: #9ca3af;
+        }
+
+        .is-address {
+          font-size: 14px;
+          color: #111827;
+          line-height: 1.6;
+        }
+        .is-address-name {
+          font-weight: 700;
+          font-size: 15px;
+          margin-bottom: 2px;
+        }
+        .is-address-phone {
+          margin-top: 4px;
+          color: #26a69a;
+          font-weight: 600;
+        }
+
+        .is-checklist {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          font-size: 13px;
+          color: #374151;
+        }
+        .is-checklist li {
+          position: relative;
+          padding: 6px 0 6px 28px;
+          line-height: 1.5;
+        }
+        .is-checklist li::before {
+          content: '✓';
+          position: absolute;
+          left: 6px;
+          top: 6px;
+          color: #26a69a;
+          font-weight: 700;
+        }
+
+        .is-methods {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .is-method {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          padding: 14px 16px;
+          border-radius: 12px;
+          border: 1.5px solid #e5e7eb;
+          background: #fff;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .is-method:hover { border-color: #cbd5e1; }
+        .is-method-active {
+          border-color: #26a69a;
+          background: linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%);
+          box-shadow: 0 0 0 4px rgba(38, 166, 154, 0.10);
+        }
+        .is-method-radio {
+          margin-top: 4px;
+          width: 18px;
+          height: 18px;
+          accent-color: #26a69a;
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        .is-method-body { flex: 1; min-width: 0; }
+        .is-method-head {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 4px;
+        }
+        .is-method-icon { font-size: 18px; }
+        .is-method-title {
+          font-size: 15px;
+          font-weight: 700;
+          color: #111827;
+          flex: 1;
+        }
+        .is-method-cost {
+          font-size: 13px;
+          font-weight: 700;
+          color: #c2410c;
+          background: #fff7ed;
+          padding: 3px 10px;
+          border-radius: 999px;
+          white-space: nowrap;
+        }
+        .is-method-free {
+          color: #047857;
+          background: #d1fae5;
+        }
+        .is-method-text {
+          font-size: 13px;
+          color: #6b7280;
+          margin: 0;
+          line-height: 1.45;
+        }
+
+        /* Summary */
+        .is-summary {
+          padding: 16px 18px;
+          background: #fff;
+          border: 1.5px solid #26a69a;
+          border-radius: 12px;
+          margin-bottom: 18px;
+        }
+        .is-summary-row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 14px;
+          color: #374151;
+          padding: 4px 0;
+        }
+        .is-summary-cost { color: #c2410c; font-weight: 600; }
+        .is-summary-total {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 10px;
+          padding-top: 10px;
+          border-top: 1px solid #e5e7eb;
+          font-size: 14px;
+          font-weight: 700;
+          color: #111827;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        .is-summary-total-value {
+          font-size: 22px;
+          color: #26a69a;
+          font-weight: 800;
+        }
+
+        /* Accept */
+        .is-accept {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          padding: 12px 14px;
+          background: #fafafa;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          cursor: pointer;
+          font-size: 13px;
+          color: #374151;
+          line-height: 1.5;
+          margin-bottom: 18px;
+        }
+        .is-accept-checkbox {
+          margin-top: 1px;
+          width: 18px;
+          height: 18px;
+          accent-color: #26a69a;
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+
+        /* Actions */
+        .is-actions {
+          display: flex;
+          gap: 10px;
+        }
+        .is-back {
+          flex: 1;
+          padding: 14px 16px;
+          border-radius: 12px;
+          background: transparent;
+          color: #6b7280;
+          border: 1px solid #e5e7eb;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          letter-spacing: 0.04em;
+        }
+        .is-back:hover {
+          background: #f9fafb;
+          border-color: #d1d5db;
+          color: #374151;
+        }
+        .is-cta {
+          flex: 2;
+          padding: 16px 20px;
+          border: none;
+          border-radius: 12px;
+          background: linear-gradient(90deg, #2196f3 0%, #4caf50 100%);
+          color: #fff;
+          font-size: 15px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          box-shadow: 0 4px 14px rgba(33, 150, 243, 0.25);
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .is-cta:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 22px rgba(33, 150, 243, 0.32);
+        }
+        .is-cta:active {
+          transform: translateY(0);
+        }
+        .is-cta-arrow {
+          font-size: 18px;
+          transition: transform 0.2s ease;
+        }
+        .is-cta:hover .is-cta-arrow { transform: translateX(4px); }
+
+        /* Pickup form */
+        .is-pickup-form {
+          margin-top: 4px;
+          padding: 16px;
+          background: #fff;
+          border: 1.5px solid #26a69a;
+          border-radius: 12px;
+          animation: is-fadein 0.25s ease;
+        }
+        .is-pickup-head { margin-bottom: 12px; }
+        .is-pickup-title {
+          display: block;
+          font-size: 14px;
+          font-weight: 700;
+          color: #0f766e;
+          margin-bottom: 2px;
+        }
+        .is-pickup-hint {
+          display: block;
+          font-size: 12px;
+          color: #6b7280;
+        }
+        .is-pickup-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .is-pickup-field {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          font-size: 12px;
+          color: #374151;
+          font-weight: 600;
+        }
+        .is-pickup-field-full { grid-column: 1 / -1; }
+        .is-pickup-field input {
+          padding: 10px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 400;
+          color: #111827;
+          background: #fff;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .is-pickup-field input:focus {
+          outline: none;
+          border-color: #26a69a;
+          box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.15);
+        }
+        .is-pickup-note {
+          margin: 12px 0 0 0;
+          padding: 10px 12px;
+          background: #f0fdfa;
+          border-left: 3px solid #26a69a;
+          border-radius: 6px;
+          font-size: 12px;
+          line-height: 1.5;
+          color: #0f766e;
+        }
+        @media (max-width: 480px) {
+          .is-pickup-grid { grid-template-columns: 1fr; }
+        }
+
+        @keyframes is-fadein {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   )
 }
-

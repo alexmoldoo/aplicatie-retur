@@ -6,7 +6,7 @@ import { OrderData } from './ReturnProcess'
 import VerificationPopup from './VerificationPopup'
 import OrderSelection from './OrderSelection'
 import { validateName, isValidOrderNumberFormat, normalizeOrderNumber } from '@/lib/order-validator'
-import { isValidRomanianPhone } from '@/lib/phone-validator'
+import { isValidRomanianPhone, formatPhoneAsTyped } from '@/lib/phone-validator'
 
 interface OrderDetailsStepProps {
   onSubmit: (data: OrderData) => void
@@ -31,6 +31,10 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
     telefon?: string
     email?: string
   }>({})
+  // Honeypot — câmp ascuns ce nu trebuie completat decât de boți
+  const [hp, setHp] = useState('')
+  // Marca timpului când userul a încărcat formularul (pentru detectare bot prea-rapid)
+  const [formStartedAt] = useState<number>(() => Date.now())
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -63,22 +67,23 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
 
     // Validare număr comandă dacă este introdus
     if (numarComanda && !isValidOrderNumberFormat(numarComanda)) {
-      setValidationErrors({ numarComanda: 'Format invalid' })
+      setValidationErrors({ numarComanda: 'Folosește doar cifre sau formatul #MX12345.' })
+      setError('Numărul de comandă pare invalid. Verifică emailul de confirmare a comenzii pentru numărul exact.')
       return
     }
 
     // Validare număr telefon dacă este introdus
     if (telefon && telefon.trim().length > 0) {
       if (!isValidRomanianPhone(telefon)) {
-        setError('Format număr de telefon invalid. Introduceți un număr românesc valid (ex: 0712345678 sau +40712345678).')
-        setValidationErrors({ telefon: 'Format invalid. Număr românesc valid: 07xx xxx xxx sau +407xx xxx xxx' })
+        setError('Numărul de telefon nu pare valid. Folosește formatul 0712 345 678 sau +40 712 345 678.')
+        setValidationErrors({ telefon: 'Format invalid. Ex: 0712 345 678' })
         return
       }
     }
 
     // Validare email format dacă este introdus (nu este obligatoriu)
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Format email invalid.')
+      setError('Adresa de email nu pare validă. Verifică să fie scrisă corect (ex: nume@exemplu.ro).')
       setValidationErrors({ email: 'Format email invalid' })
       return
     }
@@ -105,6 +110,8 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
           phone: telefon || null,
           fullName: isEmailOnlySearch ? null : (nume || null), // Nu trimite nume dacă e doar email
           email: email || null,
+          _hp: hp,
+          _formStartedAt: formStartedAt,
         }),
       })
 
@@ -121,36 +128,19 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
           onOrderSelected(result.orders)
         }
       } else {
-        // Comanda nu a fost găsită
+        // Comanda nu a fost găsită — mesaj generic pentru toate cazurile
         setLoading(false)
-        
-        // Dacă s-a încercat cu număr comandă sau telefon și nu s-a găsit
-        // Permite editarea tuturor câmpurilor, nu doar email
-        if ((normalizedOrderNumber || telefon) && !email) {
-          setShowEmail(true)
-          setSearchStep('needsEmail')
-          // Mesajul de eroare vine din API și este specific
-          if (result.message) {
-            setError(result.message)
-          } else {
-            setError('Comanda nu a fost găsită.')
-          }
-        } else if (email && result.message) {
-          // S-a încercat și cu email și nu s-a găsit - verifică mesajul
-          if (result.message.includes('Nu am găsit comenzi cu acest email')) {
-            // Email-ul nu există în Shopify
-            setError(result.message)
-            setSearchStep('needsEmail')
-          } else {
-            // Altă eroare - afișează pop-up
-            setSearchStep('notFound')
-            setShowVerificationPopup(true)
-          }
+        const genericMessage = result.message || 'Comanda nu a fost găsită. Verifică datele introduse și încearcă din nou.'
+
+        if (email) {
+          // Userul a încercat deja cu email și tot nu am găsit → afișăm pop-up de verificare
+          setSearchStep('notFound')
+          setShowVerificationPopup(true)
         } else {
-          // Nu s-a găsit și nu avem email - cere email
+          // Nu există email încă — îl oferim ca alternativă, fără să spunem ce câmp e greșit
           setShowEmail(true)
           setSearchStep('needsEmail')
-          setError('Comanda nu a fost găsită. Vă rugăm să introduceți email-ul pentru a continua căutarea.')
+          setError(genericMessage)
         }
       }
     } catch (err) {
@@ -173,6 +163,18 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
     setShowVerificationPopup(false)
     setSearchStep('initial')
     // Rămâne la aceleași date introduse
+  }
+
+  const handleResetAll = () => {
+    setNume('')
+    setNumarComanda('')
+    setTelefon('')
+    setEmail('')
+    setShowEmail(false)
+    setError(null)
+    setValidationErrors({})
+    setSearchStep('initial')
+    setFoundOrders([])
   }
 
   const handleOrderSelect = (order: any) => {
@@ -207,363 +209,563 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
         onCancel={handleVerificationCancel}
       />
 
-      <form onSubmit={handleSubmit} className="step-form">
-        {/* Spațiu rezervat pentru erori */}
-        <div style={{ minHeight: '40px', marginBottom: '16px' }}>
+      <form onSubmit={handleSubmit} className="step-form os-form">
+        {/* Honeypot — invizibil pentru oameni, vizibil pentru boți care completează tot */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: '-10000px',
+            top: 'auto',
+            width: '1px',
+            height: '1px',
+            overflow: 'hidden',
+          }}
+        >
+          <label htmlFor="website_url">Website (lasă gol)</label>
+          <input
+            type="text"
+            id="website_url"
+            name="website_url"
+            tabIndex={-1}
+            autoComplete="off"
+            value={hp}
+            onChange={(e) => setHp(e.target.value)}
+          />
+        </div>
+
+        {/* Header */}
+        <div className="os-header">
+          <div className="os-header-icon" aria-hidden="true">📦</div>
+          <h2 className="os-title">Hai să găsim comanda ta</h2>
+          <p className="os-subtitle">Completează datele de mai jos. E rapid și 100% sigur.</p>
+        </div>
+
+        {/* Eroare — animată */}
+        <div className={`os-error-slot ${error ? 'os-error-show' : ''}`}>
           {error && (
-            <div style={{
-              padding: '12px 16px',
-              backgroundColor: '#ffebee',
-              border: '1px solid #f44336',
-              borderRadius: '8px',
-              color: '#c62828',
-              fontSize: '14px'
-            }}>
-              {error}
+            <div className="os-error">
+              <span aria-hidden="true" className="os-error-icon">⚠️</span>
+              <span>{error}</span>
             </div>
           )}
         </div>
 
-        <div style={{ marginBottom: '24px' }}>
-          <label style={{
-            display: 'block',
-            fontWeight: 'bold',
-            marginBottom: '8px',
-            fontSize: '14px'
-          }}>
-            Nume & Prenume {!(email && !numarComanda && !telefon) && <span style={{ color: '#f44336' }}>*</span>}
+        {/* Nume & Prenume */}
+        <div className="os-field">
+          <label className="os-label" htmlFor="os-nume">
+            <span className="os-label-icon" aria-hidden="true">👤</span>
+            Nume & Prenume
+            {!(email && !numarComanda && !telefon) && <span className="os-required">*</span>}
           </label>
-          <input
-            type="text"
-            value={nume}
-            onChange={(e) => {
-              setNume(e.target.value)
-              if (validationErrors.nume) {
-                const newErrors = { ...validationErrors }
-                delete newErrors.nume
-                setValidationErrors(newErrors)
-              }
-            }}
-            placeholder="Introdu numele complete de pe comandă"
-            required={!(email && !numarComanda && !telefon)}
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '12px 16px',
-              borderRadius: '8px',
-              border: validationErrors.nume ? '2px solid #f44336' : '1px solid #e0e0e0',
-              fontSize: '14px',
-              outline: 'none',
-              transition: 'border-color 0.3s ease',
-              opacity: loading ? 0.6 : 1
-            }}
-            onFocus={(e) => e.target.style.borderColor = '#26a69a'}
-            onBlur={(e) => {
-              if (!validationErrors.nume) {
-                e.target.style.borderColor = '#e0e0e0'
-              }
-            }}
-          />
-          {validationErrors.nume && (
-            <p style={{
-              fontSize: '12px',
-              color: '#f44336',
-              marginTop: '4px'
-            }}>
-              {validationErrors.nume}
-            </p>
+          <div className={`os-input-wrap ${validationErrors.nume ? 'os-error-state' : ''} ${nume && !validationErrors.nume ? 'os-valid-state' : ''}`}>
+            <input
+              id="os-nume"
+              type="text"
+              className="os-input"
+              value={nume}
+              onChange={(e) => {
+                setNume(e.target.value)
+                if (validationErrors.nume) {
+                  const newErrors = { ...validationErrors }
+                  delete newErrors.nume
+                  setValidationErrors(newErrors)
+                }
+              }}
+              placeholder="Ex: Ion Popescu"
+              required={!(email && !numarComanda && !telefon)}
+              disabled={loading}
+              autoComplete="name"
+              autoCapitalize="words"
+              inputMode="text"
+            />
+            {nume && !validationErrors.nume && <span className="os-check" aria-hidden="true">✓</span>}
+          </div>
+          {validationErrors.nume ? (
+            <p className="os-hint os-hint-error">{validationErrors.nume}</p>
+          ) : (
+            <p className="os-hint">Așa cum apare pe comandă</p>
           )}
         </div>
 
-        {/* Câmpuri pentru comandă SAU telefon */}
-        <div style={{
-          marginBottom: '24px',
-          padding: '16px',
-          backgroundColor: '#f5f5f5',
-          borderRadius: '8px',
-          border: '1px solid #e0e0e0'
-        }}>
-          <p style={{
-            fontSize: '13px',
-            fontWeight: 'bold',
-            marginBottom: '16px',
-            color: '#333',
-            textAlign: 'center'
-          }}>
-            Introduceți <span style={{ color: '#f44336' }}>fie</span> numărul de comandă <span style={{ color: '#f44336' }}>fie</span> numărul de telefon
+        {/* Comandă SAU telefon */}
+        <div className="os-card">
+          <p className="os-card-title">
+            Introdu <strong>fie</strong> numărul de comandă <strong>fie</strong> numărul de telefon
           </p>
-          
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{
-              display: 'block',
-              fontWeight: 'bold',
-              marginBottom: '8px',
-              fontSize: '14px'
-            }}>
-              Număr comandă {!telefon && <span style={{ color: '#f44336' }}>*</span>}
+
+          <div className="os-field">
+            <label className="os-label" htmlFor="os-comanda">
+              <span className="os-label-icon" aria-hidden="true">🧾</span>
+              Număr comandă
+              {!telefon && <span className="os-required">*</span>}
             </label>
-            <input
-              type="text"
-              value={numarComanda}
-              onChange={(e) => {
-                setNumarComanda(e.target.value)
-                // Dacă introduce comandă, șterge telefonul
-                if (e.target.value && telefon) {
-                  setTelefon('')
-                }
-                if (validationErrors.numarComanda) {
-                  const newErrors = { ...validationErrors }
-                  delete newErrors.numarComanda
-                  setValidationErrors(newErrors)
-                }
-              }}
-              placeholder="Ex: #MX12345 sau 12345"
-              required={!telefon}
-              disabled={loading}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                border: validationErrors.numarComanda ? '2px solid #f44336' : '1px solid #e0e0e0',
-                fontSize: '14px',
-                outline: 'none',
-                transition: 'border-color 0.3s ease',
-                opacity: loading ? 0.5 : 1,
-                backgroundColor: telefon ? '#f5f5f5' : '#fff'
-              }}
-              onFocus={(e) => {
-                if (!telefon) {
-                  e.target.style.borderColor = '#26a69a'
-                }
-              }}
-              onBlur={(e) => {
-                if (!validationErrors.numarComanda && !telefon) {
-                  e.target.style.borderColor = '#e0e0e0'
-                }
-              }}
-            />
-            {validationErrors.numarComanda && (
-              <p style={{
-                fontSize: '12px',
-                color: '#f44336',
-                marginTop: '4px'
-              }}>
-                {validationErrors.numarComanda}
-              </p>
+            <div className={`os-input-wrap ${validationErrors.numarComanda ? 'os-error-state' : ''} ${numarComanda && !validationErrors.numarComanda ? 'os-valid-state' : ''} ${telefon ? 'os-disabled-soft' : ''}`}>
+              <input
+                id="os-comanda"
+                type="text"
+                className="os-input"
+                value={numarComanda}
+                onChange={(e) => {
+                  setNumarComanda(e.target.value)
+                  if (e.target.value && telefon) setTelefon('')
+                  if (validationErrors.numarComanda) {
+                    const newErrors = { ...validationErrors }
+                    delete newErrors.numarComanda
+                    setValidationErrors(newErrors)
+                  }
+                }}
+                placeholder="Ex: #MX12345 sau 12345"
+                required={!telefon}
+                disabled={loading}
+                autoComplete="off"
+                inputMode="text"
+                onBlur={() => {
+                  const trimmed = numarComanda.trim()
+                  if (trimmed && /^\d+$/.test(trimmed)) {
+                    setNumarComanda(`#MX${trimmed}`)
+                  }
+                }}
+              />
+              {numarComanda && !validationErrors.numarComanda && <span className="os-check" aria-hidden="true">✓</span>}
+            </div>
+            {validationErrors.numarComanda ? (
+              <p className="os-hint os-hint-error">{validationErrors.numarComanda}</p>
+            ) : (
+              <p className="os-hint">Îl găsești în emailul de confirmare (ex: #MX12345)</p>
             )}
           </div>
 
-          <div style={{
-            textAlign: 'center',
-            margin: '12px 0',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#666'
-          }}>
-            SAU
+          <div className="os-divider">
+            <span>SAU</span>
           </div>
 
-          <div>
-            <label style={{
-              display: 'block',
-              fontWeight: 'bold',
-              marginBottom: '8px',
-              fontSize: '14px'
-            }}>
-              Număr de telefon {!numarComanda && <span style={{ color: '#f44336' }}>*</span>}
+          <div className="os-field">
+            <label className="os-label" htmlFor="os-telefon">
+              <span className="os-label-icon" aria-hidden="true">📞</span>
+              Număr de telefon
+              {!numarComanda && <span className="os-required">*</span>}
             </label>
-            <input
-              type="tel"
-              value={telefon}
-              onChange={(e) => {
-                setTelefon(e.target.value)
-                // Dacă introduce telefon, șterge comanda
-                if (e.target.value && numarComanda) {
-                  setNumarComanda('')
-                }
-                if (validationErrors.telefon) {
-                  const newErrors = { ...validationErrors }
-                  delete newErrors.telefon
-                  setValidationErrors(newErrors)
-                }
-              }}
-              placeholder="Introdu numărul de telefon"
-              required={!numarComanda}
-              disabled={loading}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                border: validationErrors.telefon ? '2px solid #f44336' : '1px solid #e0e0e0',
-                fontSize: '14px',
-                outline: 'none',
-                transition: 'border-color 0.3s ease',
-                opacity: loading ? 0.5 : 1,
-                backgroundColor: numarComanda ? '#f5f5f5' : '#fff'
-              }}
-              onFocus={(e) => {
-                if (!numarComanda) {
-                  e.target.style.borderColor = '#26a69a'
-                }
-              }}
-              onBlur={(e) => {
-                if (!validationErrors.telefon && !numarComanda) {
-                  e.target.style.borderColor = '#e0e0e0'
-                }
-              }}
-            />
-            {validationErrors.telefon && (
-              <p style={{
-                fontSize: '12px',
-                color: '#f44336',
-                marginTop: '4px'
-              }}>
-                {validationErrors.telefon}
-              </p>
+            <div className={`os-input-wrap ${validationErrors.telefon ? 'os-error-state' : ''} ${telefon && !validationErrors.telefon ? 'os-valid-state' : ''} ${numarComanda ? 'os-disabled-soft' : ''}`}>
+              <input
+                id="os-telefon"
+                type="tel"
+                className="os-input"
+                value={telefon}
+                onChange={(e) => {
+                  const formatted = formatPhoneAsTyped(e.target.value)
+                  setTelefon(formatted)
+                  if (formatted && numarComanda) setNumarComanda('')
+                  if (validationErrors.telefon) {
+                    const newErrors = { ...validationErrors }
+                    delete newErrors.telefon
+                    setValidationErrors(newErrors)
+                  }
+                }}
+                placeholder="0712 345 678"
+                required={!numarComanda}
+                disabled={loading}
+                autoComplete="tel"
+                inputMode="tel"
+              />
+              {telefon && !validationErrors.telefon && <span className="os-check" aria-hidden="true">✓</span>}
+            </div>
+            {validationErrors.telefon ? (
+              <p className="os-hint os-hint-error">{validationErrors.telefon}</p>
+            ) : (
+              <p className="os-hint">Numărul folosit la plasarea comenzii</p>
             )}
           </div>
         </div>
 
-        {/* Câmp email - apare doar când este necesar, dar nu este obligatoriu */}
+        {/* Email opțional */}
         {showEmail && (
-          <div style={{ 
-            marginBottom: '24px',
-            animation: 'fadeIn 0.3s ease-in',
-            padding: '16px',
-            backgroundColor: '#f5f5f5',
-            borderRadius: '8px',
-            border: '1px solid #e0e0e0'
-          }}>
-            <p style={{
-              fontSize: '13px',
-              color: '#666',
-              marginBottom: '12px',
-              fontStyle: 'italic'
-            }}>
-              Introdu un email pentru a extinde căutările
+          <div className="os-card os-card-accent os-fadein">
+            <p className="os-card-hint">
+              <span aria-hidden="true">✉️</span> Adaugă un email pentru a extinde căutările
             </p>
-            <label style={{
-              display: 'block',
-              fontWeight: 'bold',
-              marginBottom: '8px',
-              fontSize: '14px',
-              color: '#26a69a'
-            }}>
-              Email (opțional)
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                if (validationErrors.email) {
-                  const newErrors = { ...validationErrors }
-                  delete newErrors.email
-                  setValidationErrors(newErrors)
-                }
-              }}
-              placeholder="Introdu email-ul folosit la comandă (opțional)"
-              disabled={loading}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                border: validationErrors.email ? '2px solid #f44336' : '1px solid #e0e0e0',
-                fontSize: '14px',
-                outline: 'none',
-                transition: 'border-color 0.3s ease',
-                opacity: loading ? 0.6 : 1
-              }}
-              onFocus={(e) => e.target.style.borderColor = '#26a69a'}
-              onBlur={(e) => {
-                if (!validationErrors.email) {
-                  e.target.style.borderColor = '#e0e0e0'
-                }
-              }}
-            />
-            {validationErrors.email && (
-              <p style={{
-                fontSize: '12px',
-                color: '#f44336',
-                marginTop: '4px'
-              }}>
-                {validationErrors.email}
-              </p>
-            )}
+            <div className="os-field">
+              <label className="os-label" htmlFor="os-email">
+                <span className="os-label-icon" aria-hidden="true">✉️</span>
+                Email (opțional)
+              </label>
+              <div className={`os-input-wrap ${validationErrors.email ? 'os-error-state' : ''} ${email && !validationErrors.email ? 'os-valid-state' : ''}`}>
+                <input
+                  id="os-email"
+                  type="email"
+                  className="os-input"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    if (validationErrors.email) {
+                      const newErrors = { ...validationErrors }
+                      delete newErrors.email
+                      setValidationErrors(newErrors)
+                    }
+                  }}
+                  placeholder="nume@exemplu.ro"
+                  disabled={loading}
+                  autoComplete="email"
+                  inputMode="email"
+                />
+                {email && !validationErrors.email && <span className="os-check" aria-hidden="true">✓</span>}
+              </div>
+              {validationErrors.email && <p className="os-hint os-hint-error">{validationErrors.email}</p>}
+            </div>
           </div>
         )}
 
-        {/* Mesaj informativ */}
-        <div style={{ minHeight: '60px', marginBottom: '24px' }}>
-          <p style={{
-            fontSize: '14px',
-            color: '#666',
-            textAlign: 'center'
-          }}>
-            {searchStep === 'searching' 
-              ? 'Căutăm comanda...' 
-              : searchStep === 'needsEmail'
-              ? 'Vă rugăm să introduceți email-ul pentru a continua căutarea.'
-              : 'Vom încerca să găsim comanda pe baza informațiilor furnizate.'}
-          </p>
-        </div>
+        {/* Stare căutare */}
+        <p className="os-status">
+          {searchStep === 'searching'
+            ? 'Căutăm comanda...'
+            : searchStep === 'needsEmail'
+            ? 'Adaugă email-ul pentru a continua căutarea.'
+            : 'Vom încerca să găsim comanda pe baza informațiilor furnizate.'}
+        </p>
 
-        {/* Indicator de loading */}
-        <div style={{ minHeight: '60px', marginBottom: '24px', textAlign: 'center' }}>
-          {loading && (
-            <div style={{
-              display: 'inline-block',
-              width: '40px',
-              height: '40px',
-              border: '4px solid #f3f3f3',
-              borderTop: '4px solid #26a69a',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite'
-            }} />
+        {/* Loading spinner */}
+        {loading && (
+          <div className="os-loading">
+            <div className="os-spinner" />
+          </div>
+        )}
+
+        {/* CTA */}
+        <button type="submit" disabled={loading} className="os-cta">
+          {loading ? (
+            <>CĂUTĂM<span className="os-dots"><span>.</span><span>.</span><span>.</span></span></>
+          ) : (
+            <>
+              <span className="os-cta-icon" aria-hidden="true">🔍</span>
+              CAUTĂ COMANDA
+              <span className="os-cta-arrow" aria-hidden="true">→</span>
+            </>
           )}
-        </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            width: '100%',
-            padding: '16px',
-            borderRadius: '8px',
-            background: loading 
-              ? '#ccc' 
-              : 'linear-gradient(90deg, #2196F3 0%, #4CAF50 100%)',
-            color: '#fff',
-            border: 'none',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            textTransform: 'uppercase',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-            opacity: loading ? 0.6 : 1
-          }}
-          onMouseOver={(e) => {
-            if (!loading) {
-              e.currentTarget.style.transform = 'translateY(-2px)'
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)'
-            }
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)'
-            e.currentTarget.style.boxShadow = 'none'
-          }}
-        >
-          {loading ? 'CĂUTĂM...' : 'CAUTĂ COMANDA'}
         </button>
 
+        {(nume || numarComanda || telefon || email) && !loading && (
+          <button type="button" onClick={handleResetAll} className="os-reset">
+            ✕ Șterge tot și reîncepe
+          </button>
+        )}
+
+        {/* U7 — link spre contact */}
+        <div className="os-help-wrap">
+          <button
+            type="button"
+            onClick={() => router.push('/contact?reason=cant_find_order')}
+            className="os-help-link"
+          >
+            Nu-mi găsesc comanda — am nevoie de ajutor
+          </button>
+        </div>
+
         <style jsx>{`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+          .os-form {
+            max-width: 480px;
+            margin: 0 auto;
           }
-          @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
+
+          /* Header */
+          .os-header {
+            text-align: center;
+            margin-bottom: 24px;
+          }
+          .os-header-icon {
+            font-size: 40px;
+            margin-bottom: 8px;
+          }
+          .os-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin: 0 0 6px 0;
+            letter-spacing: -0.02em;
+          }
+          .os-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+            margin: 0;
+          }
+          @media (min-width: 481px) {
+            .os-title { font-size: 26px; }
+            .os-subtitle { font-size: 15px; }
+          }
+
+          /* Error */
+          .os-error-slot {
+            min-height: 0;
+            margin-bottom: 0;
+            transition: min-height 0.25s ease, margin-bottom 0.25s ease;
+          }
+          .os-error-show {
+            min-height: 56px;
+            margin-bottom: 8px;
+          }
+          .os-error {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 12px 14px;
+            background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
+            border: 1px solid #fecaca;
+            border-radius: 10px;
+            color: #b91c1c;
+            font-size: 14px;
+            line-height: 1.5;
+            animation: os-fadein 0.3s ease;
+          }
+          .os-error-icon { flex-shrink: 0; }
+
+          /* Field */
+          .os-field { margin-bottom: 18px; }
+          .os-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #374151;
+            margin-bottom: 8px;
+            letter-spacing: 0.01em;
+          }
+          .os-label-icon { font-size: 15px; }
+          .os-required {
+            color: #ef4444;
+            margin-left: 2px;
+          }
+
+          /* Input wrap */
+          .os-input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            border: 1.5px solid #e5e7eb;
+            border-radius: 10px;
+            background: #fff;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+          }
+          .os-input-wrap:focus-within {
+            border-color: #26a69a;
+            box-shadow: 0 0 0 4px rgba(38, 166, 154, 0.12);
+          }
+          .os-input-wrap.os-error-state {
+            border-color: #ef4444;
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.10);
+          }
+          .os-input-wrap.os-valid-state {
+            border-color: #26a69a;
+          }
+          .os-input-wrap.os-disabled-soft {
+            background-color: #f9fafb;
+            opacity: 0.7;
+          }
+          .os-input {
+            flex: 1;
+            width: 100%;
+            padding: 13px 14px;
+            border: none;
+            background: transparent;
+            font-size: 16px; /* 16px previne zoom pe iOS */
+            color: #111827;
+            outline: none;
+            border-radius: 10px;
+          }
+          .os-input::placeholder { color: #9ca3af; }
+          .os-input:disabled { cursor: not-allowed; }
+          .os-check {
+            color: #26a69a;
+            font-weight: 700;
+            font-size: 18px;
+            padding-right: 14px;
+            animation: os-pop 0.25s ease;
+          }
+
+          /* Hints */
+          .os-hint {
+            font-size: 12px;
+            color: #9ca3af;
+            margin: 6px 0 0 0;
+            line-height: 1.4;
+          }
+          .os-hint-error { color: #ef4444; }
+
+          /* Card group (comandă/telefon, email) */
+          .os-card {
+            padding: 18px 16px;
+            background: #fafafa;
+            border: 1px solid #f0f0f0;
+            border-radius: 12px;
+            margin-bottom: 20px;
+          }
+          .os-card-accent {
+            background: linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%);
+            border-color: #ccfbf1;
+          }
+          .os-card-title {
+            font-size: 13px;
+            color: #4b5563;
+            margin: 0 0 14px 0;
+            text-align: center;
+          }
+          .os-card-title strong { color: #ef4444; }
+          .os-card-hint {
+            font-size: 13px;
+            color: #0f766e;
+            margin: 0 0 12px 0;
+            font-style: italic;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+
+          /* Divider SAU */
+          .os-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 14px 0;
+          }
+          .os-divider::before,
+          .os-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #e5e7eb;
+          }
+          .os-divider span {
+            font-size: 12px;
+            font-weight: 700;
+            color: #9ca3af;
+            letter-spacing: 0.1em;
+          }
+
+          /* Status */
+          .os-status {
+            font-size: 13px;
+            color: #6b7280;
+            text-align: center;
+            margin: 0 0 16px 0;
+            min-height: 20px;
+          }
+
+          /* Loading */
+          .os-loading {
+            text-align: center;
+            margin-bottom: 16px;
+          }
+          .os-spinner {
+            display: inline-block;
+            width: 36px;
+            height: 36px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #26a69a;
+            border-radius: 50%;
+            animation: os-spin 0.8s linear infinite;
+          }
+
+          /* CTA */
+          .os-cta {
+            width: 100%;
+            padding: 16px 20px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(90deg, #2196f3 0%, #4caf50 100%);
+            color: #fff;
+            font-size: 15px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 4px 14px rgba(33, 150, 243, 0.25);
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease;
+          }
+          .os-cta:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 22px rgba(33, 150, 243, 0.32);
+          }
+          .os-cta:active:not(:disabled) {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.25);
+          }
+          .os-cta:disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+            box-shadow: none;
+            opacity: 0.8;
+          }
+          .os-cta-icon { font-size: 16px; }
+          .os-cta-arrow {
+            font-size: 18px;
+            transition: transform 0.2s ease;
+          }
+          .os-cta:hover:not(:disabled) .os-cta-arrow { transform: translateX(4px); }
+          .os-dots span {
+            display: inline-block;
+            animation: os-blink 1.4s infinite both;
+          }
+          .os-dots span:nth-child(2) { animation-delay: 0.2s; }
+          .os-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+          /* Reset */
+          .os-reset {
+            width: 100%;
+            margin-top: 10px;
+            padding: 11px;
+            border-radius: 10px;
+            background: transparent;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+          }
+          .os-reset:hover {
+            background: #f9fafb;
+            border-color: #d1d5db;
+            color: #374151;
+          }
+
+          /* Help link */
+          .os-help-wrap {
+            margin-top: 18px;
+            text-align: center;
+          }
+          .os-help-link {
+            background: none;
+            border: none;
+            color: #26a69a;
+            font-size: 13px;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            cursor: pointer;
+            padding: 8px;
+            transition: color 0.2s ease;
+          }
+          .os-help-link:hover { color: #00897b; }
+
+          /* Animations */
+          .os-fadein { animation: os-fadein 0.35s ease; }
+          @keyframes os-spin {
+            to { transform: rotate(360deg); }
+          }
+          @keyframes os-fadein {
+            from { opacity: 0; transform: translateY(-6px); }
             to { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes os-pop {
+            from { opacity: 0; transform: scale(0.5); }
+            to { opacity: 1; transform: scale(1); }
+          }
+          @keyframes os-blink {
+            0%, 80%, 100% { opacity: 0.3; }
+            40% { opacity: 1; }
           }
         `}</style>
       </form>

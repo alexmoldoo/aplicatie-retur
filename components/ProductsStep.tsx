@@ -20,13 +20,14 @@ export default function ProductsStep({ products, onSubmit, onBack }: ProductsSte
   const [excludedSKUs, setExcludedSKUs] = useState<string[]>(['RMA-009', 'RMA-025'])
   const [error, setError] = useState<string | null>(null)
   
-  // Produsele NU sunt selectate default - trebuie selectate manual
+  // Păstrează starea anterioară dacă utilizatorul revine la pas 3 din pas 4
   const [selectedProducts, setSelectedProducts] = useState<Product[]>(
-    products.map(p => ({ 
-      ...p, 
-      selected: false, // Nu sunt selectate default
-      cantitateReturnata: 0, // Cantitatea selectată pentru retur (0 = neselectat)
-      alteMotive: p.alteMotive || '' // Câmp pentru "Alte motive"
+    products.map(p => ({
+      ...p,
+      selected: p.selected ?? false,
+      cantitateReturnata: p.cantitateReturnata ?? 0,
+      motivRetur: p.motivRetur || '',
+      alteMotive: p.alteMotive || ''
     }))
   )
 
@@ -84,11 +85,9 @@ export default function ProductsStep({ products, onSubmit, onBack }: ProductsSte
   }
 
   // Verifică dacă un produs este transport (nu necesită motiv retur)
+  // Sursa de adevăr: id-ul transportului începe cu "shipping-" (vezi convertShopifyOrderToAppFormat)
   const isTransport = (product: Product) => {
-    // Verifică dacă numele produsului conține cuvinte cheie pentru transport
-    const transportKeywords = ['transport', 'livrare', 'shipping', 'delivery', 'curier', 'standard', 'serviciu']
-    const productName = product.nume.toLowerCase()
-    return transportKeywords.some(keyword => productName.includes(keyword))
+    return typeof product.id === 'string' && product.id.startsWith('shipping-')
   }
 
   const handleSubmit = (e: FormEvent) => {
@@ -106,28 +105,35 @@ export default function ProductsStep({ products, onSubmit, onBack }: ProductsSte
       setError('Vă rugăm să selectați cel puțin un produs pentru retur.')
       return
     }
-    
-    // Filtrează produsele selectate (cu cantitate > 0) - motivul retur nu mai este obligatoriu
-    const productsToReturn = selectedProducts.filter(p => {
+
+    // Validare: dacă userul a ales "Alte motive", textarea trebuie completată
+    const incompleteOtherReason = selectedProducts.find(p => {
       if (!p.selected) return false
-      const cantitateReturnata = p.cantitateReturnata || (p.selected ? (p.cantitate || 1) : 0)
-      return cantitateReturnata > 0
+      if (isTransport(p)) return false
+      return p.motivRetur === 'Alte motive' && (!p.alteMotive || p.alteMotive.trim().length < 5)
     })
-    
-    // Asigură-te că toate produsele au cantitateReturnata setată corect
-    const productsWithQuantity = productsToReturn.map(p => ({
+    if (incompleteOtherReason) {
+      setError(`Te rugăm să descrii motivul (minim 5 caractere) pentru produsul "${normalizeProductName(incompleteOtherReason)}".`)
+      return
+    }
+
+    // Trimite lista completă (cu starea de selecție păstrată) ca să nu pierdem nimic la back
+    const productsWithState = selectedProducts.map(p => ({
       ...p,
-      cantitateReturnata: p.cantitateReturnata || (p.selected ? (p.cantitate || 1) : 0),
-      // Păstrează motivRetur doar dacă există, altfel lasă-l gol
+      selected: p.selected ?? false,
+      cantitateReturnata: p.selected
+        ? (p.cantitateReturnata || p.cantitate || 1)
+        : 0,
       motivRetur: p.motivRetur || ''
     }))
-    onSubmit(productsWithQuantity)
+    onSubmit(productsWithState)
   }
 
   // Verifică dacă un produs poate fi returnat (nu este în lista de excludere)
   const canReturnProduct = (product: Product) => {
     if (!product.sku) return true // Dacă nu are SKU, poate fi returnat
-    return !excludedSKUs.includes(product.sku.toUpperCase())
+    const skuUpper = product.sku.toUpperCase()
+    return !excludedSKUs.some(s => (s || '').toUpperCase() === skuUpper)
   }
 
   // Sortează produsele: restricționate (portocaliu) la final
@@ -139,14 +145,12 @@ export default function ProductsStep({ products, onSubmit, onBack }: ProductsSte
     return 0 // Ambele la fel → păstrează ordinea
   })
 
-  // Redenumește transportul
-  const normalizeProductName = (name: string) => {
-    const transportKeywords = ['transport', 'livrare', 'shipping', 'delivery', 'curier', 'standard']
-    const lowerName = name.toLowerCase()
-    if (transportKeywords.some(keyword => lowerName.includes(keyword))) {
+  // Redenumește transportul (doar pentru itemii care SUNT transport, identificați după id)
+  const normalizeProductName = (product: Product) => {
+    if (isTransport(product)) {
       return 'Transport / Serviciu de livrare'
     }
-    return name
+    return product.nume
   }
 
   return (
@@ -217,7 +221,7 @@ export default function ProductsStep({ products, onSubmit, onBack }: ProductsSte
                   fontWeight: 'bold',
                   marginBottom: '8px'
                 }}>
-                  {normalizeProductName(product.nume)}
+                  {normalizeProductName(product)}
                 </h4>
                 <p style={{ fontSize: '14px', color: '#666' }}>
                   Cantitate: {product.cantitate} buc
@@ -295,7 +299,7 @@ export default function ProductsStep({ products, onSubmit, onBack }: ProductsSte
               )}
             </div>
 
-            {product.selected && canReturn && !isTransport({ ...product, nume: normalizeProductName(product.nume) }) && (
+            {product.selected && canReturn && !isTransport(product) && (
               <div style={{ marginTop: '12px' }}>
                 <label style={{
                   display: 'block',

@@ -2,7 +2,7 @@
 
 import { useState, FormEvent, ChangeEvent, useEffect } from 'react'
 import { RefundData, OrderData, Product } from './ReturnProcess'
-import { validateRomanianIBAN, formatIBAN } from '@/lib/iban-validator'
+import { validateRomanianIBAN } from '@/lib/iban-validator'
 
 interface RefundDetailsStepProps {
   onSubmit: (data: RefundData) => void
@@ -12,120 +12,109 @@ interface RefundDetailsStepProps {
   initialRefundData?: RefundData | null
 }
 
-export default function RefundDetailsStep({ 
-  onSubmit, 
-  onBack, 
-  orderData, 
+export default function RefundDetailsStep({
+  onSubmit,
+  onBack,
+  orderData,
   products,
   initialRefundData
 }: RefundDetailsStepProps) {
   const wasPaidWithCard = orderData?.wasPaidWithCard || false
-  
-  // Inițializare: dacă există date inițiale, le folosim, altfel folosim valorile default
-  const [metodaRambursare, setMetodaRambursare] = useState<'card' | 'cont'>(
-    initialRefundData?.metodaRambursare || (wasPaidWithCard ? 'card' : 'cont')
-  )
+
+  // Metoda este determinată automat de cum a fost plătită comanda — userul nu alege.
+  // Card → refund pe cardul original; ramburs/transfer → cont bancar (necesită IBAN).
+  const metodaRambursare: 'card' | 'cont' = wasPaidWithCard ? 'card' : 'cont'
+
   const [iban, setIban] = useState(initialRefundData?.iban || '')
   const [numeTitular, setNumeTitular] = useState(initialRefundData?.numeTitular || '')
   const [ibanError, setIbanError] = useState<string | null>(null)
   const [numeTitularError, setNumeTitularError] = useState<string | null>(null)
-  const [contulEsteAlMeu, setContulEsteAlMeu] = useState(initialRefundData?.contulEsteAlMeu ?? true)
+  // null = niciuna selectată (start curat); true = al meu; false = altă persoană
+  const [contulEsteAlMeu, setContulEsteAlMeu] = useState<boolean | null>(
+    initialRefundData?.contulEsteAlMeu ?? null
+  )
   const [acordPrevederiLegale, setAcordPrevederiLegale] = useState(initialRefundData?.acordPrevederiLegale || false)
-  const [refundPeCard, setRefundPeCard] = useState(wasPaidWithCard) // Preselectat dacă a fost plătit cu cardul
+  const [acordError, setAcordError] = useState<string | null>(null)
+  const [proprietarError, setProprietarError] = useState<string | null>(null)
 
-  // Efect pentru a actualiza starea când se schimbă wasPaidWithCard sau initialRefundData
   useEffect(() => {
     if (initialRefundData) {
-      // Dacă avem date inițiale, le folosim
-      setMetodaRambursare(initialRefundData.metodaRambursare || (wasPaidWithCard ? 'card' : 'cont'))
       setIban(initialRefundData.iban || '')
       setNumeTitular(initialRefundData.numeTitular || '')
-      setContulEsteAlMeu(initialRefundData.contulEsteAlMeu ?? true)
+      setContulEsteAlMeu(initialRefundData.contulEsteAlMeu ?? null)
       setAcordPrevederiLegale(initialRefundData.acordPrevederiLegale || false)
-    } else if (wasPaidWithCard) {
-      setMetodaRambursare('card')
-      setRefundPeCard(true)
-    } else {
-      setMetodaRambursare('cont')
-      setRefundPeCard(false)
     }
-  }, [wasPaidWithCard, initialRefundData])
+  }, [initialRefundData])
 
-  // Calculează totalul pe baza cantității returnate (nu totale)
-  const totalRefund = products.reduce((sum, p) => {
+  // Doar produsele selectate apar în rezumatul de rambursare
+  const selectedProducts = products.filter(p => p.selected && (p.cantitateReturnata || 0) > 0)
+
+  const totalRefund = selectedProducts.reduce((sum, p) => {
     const cantitateReturnata = p.cantitateReturnata || (p.selected ? p.cantitate : 0)
     return sum + (p.pret * cantitateReturnata)
   }, 0)
 
+  // Validare live pentru a putea afișa ✓ valid pe IBAN
+  const cleanIban = iban.replace(/\s/g, '').toUpperCase()
+  const ibanValidation = validateRomanianIBAN(cleanIban)
+  const isIbanValid = cleanIban.length > 0 && ibanValidation.valid
+
   const handleIbanChange = (e: ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.toUpperCase()
-    // Limitează la 29 caractere (24 caractere IBAN + 5 spații)
     const limitedValue = value.slice(0, 29)
     setIban(limitedValue)
-    // Nu validăm în timp real, doar la submit
     setIbanError(null)
   }
 
-
-  // Validare nume titular: minim 3 caractere pentru nume și 3 pentru prenume
   const validateNumeTitular = (nume: string): { valid: boolean } => {
     const trimmed = nume.trim()
-    if (trimmed.length === 0) {
-      return { valid: false }
-    }
-    
+    if (trimmed.length === 0) return { valid: false }
     const parts = trimmed.split(/\s+/).filter(p => p.length > 0)
-    if (parts.length < 2) {
-      return { valid: false }
-    }
-    
+    if (parts.length < 2) return { valid: false }
     const numeFamilie = parts[0]
     const prenume = parts.slice(1).join(' ')
-    
-    if (numeFamilie.length < 3 || prenume.length < 3) {
-      return { valid: false }
-    }
-    
+    if (numeFamilie.length < 3 || prenume.length < 3) return { valid: false }
     return { valid: true }
   }
+  const isNumeTitularValid = validateNumeTitular(numeTitular).valid
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
-    
-    // Validare IBAN DOAR la submit (nu în timp real)
+    setIbanError(null)
+    setNumeTitularError(null)
+    setAcordError(null)
+    setProprietarError(null)
+
     if (metodaRambursare === 'cont') {
-      // Validare IBAN (acceptă atât cu spații cât și fără)
-      const cleanIban = iban.replace(/\s/g, '').toUpperCase()
-      const validation = validateRomanianIBAN(cleanIban)
-      if (!validation.valid) {
-        setIbanError(validation.error || 'IBAN invalid')
+      if (!ibanValidation.valid) {
+        setIbanError(ibanValidation.error || 'IBAN invalid')
         return
       }
-      
-      // Validare nume titular DOAR la submit
-      const numeValidation = validateNumeTitular(numeTitular)
-      if (!numeValidation.valid) {
-        setNumeTitularError('Nume incomplet')
+
+      if (contulEsteAlMeu === null) {
+        setProprietarError('Te rugăm să specifici dacă contul e al tău sau al altcuiva.')
         return
-      } else {
-        setNumeTitularError(null)
       }
-      
-      // Dacă contul nu este al clientului, trebuie să fie de acord cu prevederile legale
-      if (!contulEsteAlMeu && !acordPrevederiLegale) {
-        alert('Pentru transfer către altă persoană, trebuie să fiți de acord cu prevederile legale.')
+
+      if (!isNumeTitularValid) {
+        setNumeTitularError('Introdu nume și prenume (minim 3 caractere fiecare)')
+        return
+      }
+
+      if (contulEsteAlMeu === false && !acordPrevederiLegale) {
+        setAcordError('Pentru transfer către altă persoană, trebuie să fii de acord cu prevederile legale.')
         return
       }
     }
-    
+
     const refundData: RefundData = {
       metodaRambursare,
-      documente: [], // Nu mai folosim documente
+      documente: [],
       ...(metodaRambursare === 'cont' && {
-        iban: iban.replace(/\s/g, ''), // IBAN fără spații
+        iban: cleanIban,
         numeTitular,
-        contulEsteAlMeu,
-        acordPrevederiLegale: !contulEsteAlMeu ? acordPrevederiLegale : undefined,
+        contulEsteAlMeu: contulEsteAlMeu === true,
+        acordPrevederiLegale: contulEsteAlMeu === false ? acordPrevederiLegale : undefined,
       }),
       ...(metodaRambursare === 'card' && wasPaidWithCard && {
         detaliiCard: 'refund_to_original_card',
@@ -135,588 +124,640 @@ export default function RefundDetailsStep({
     onSubmit(refundData)
   }
 
-  const generateDocument = () => {
-    const content = `
-CERERE DE RETUR
-================
-
-Date comandă:
-- Nume: ${orderData?.nume}
-- Număr comandă: ${orderData?.numarComanda}
-- Telefon: ${orderData?.telefon}
-
-Produse returnate:
-${products.map(p => `- ${p.nume} (${p.cantitate} buc) - ${p.pret.toFixed(2)} RON${p.motivRetur ? ` - Motiv: ${p.motivRetur}` : ''}`).join('\n')}
-
-Total rambursare: ${totalRefund.toFixed(2)} RON
-
-Metodă rambursare: ${metodaRambursare === 'card' ? 'Card bancar' : 'Cont bancar'}
-${metodaRambursare === 'cont' ? `IBAN: ${iban}\nNume titular: ${numeTitular}` : ''}
-
-Data: ${new Date().toLocaleDateString('ro-RO')}
-    `
-    
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `cerere-retur-${orderData?.numarComanda}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const formError = ibanError || numeTitularError || proprietarError || acordError
 
   return (
-    <form onSubmit={handleSubmit} className="step-form-large">
-      <h3 style={{
-        fontSize: '20px',
-        fontWeight: 'bold',
-        marginBottom: '24px'
-      }}>
-        Date rambursare
-      </h3>
+    <form onSubmit={handleSubmit} className="rd-form step-form-large">
+      <div className="rd-header">
+        <div className="rd-header-icon" aria-hidden="true">{wasPaidWithCard ? '💳' : '🏦'}</div>
+        <h2 className="rd-title">Date pentru rambursare</h2>
+        <p className="rd-subtitle">
+          {wasPaidWithCard
+            ? 'Banii merg automat pe cardul cu care ai plătit comanda.'
+            : 'Completează contul bancar în care vrei să primești banii.'}
+        </p>
+      </div>
 
-      {/* Spațiu rezervat pentru erori */}
-      <div style={{ minHeight: '40px', marginBottom: '16px' }}>
-        {(ibanError || numeTitularError) && (
-          <div style={{
-            padding: '12px 16px',
-            backgroundColor: '#ffebee',
-            border: '1px solid #f44336',
-            borderRadius: '8px',
-            color: '#c62828',
-            fontSize: '14px',
-            marginBottom: '16px'
-          }}>
-            {ibanError || numeTitularError}
+      <div className={`rd-error-slot ${formError ? 'rd-error-show' : ''}`}>
+        {formError && (
+          <div className="rd-error" role="alert">
+            <span aria-hidden="true" className="rd-error-icon">⚠️</span>
+            <span>{formError}</span>
           </div>
         )}
       </div>
 
-      {/* Tabel cu produsele selectate */}
-      <div style={{
-        marginBottom: '24px',
-        overflowX: 'auto'
-      }}>
-        <h4 style={{
-          fontSize: '16px',
-          fontWeight: 'bold',
-          marginBottom: '12px'
-        }}>
-          Produse selectate pentru retur
-        </h4>
-        <table style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          backgroundColor: '#fff',
-          borderRadius: '8px',
-          overflow: 'hidden',
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-        }}>
-          <thead>
-            <tr style={{
-              backgroundColor: '#f5f5f5',
-              borderBottom: '2px solid #e0e0e0'
-            }}>
-              <th style={{
-                padding: '12px',
-                textAlign: 'left',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                borderBottom: '1px solid #e0e0e0'
-              }}>Produs</th>
-              <th style={{
-                padding: '12px',
-                textAlign: 'center',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                borderBottom: '1px solid #e0e0e0'
-              }}>Cantitate</th>
-              <th style={{
-                padding: '12px',
-                textAlign: 'right',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                borderBottom: '1px solid #e0e0e0'
-              }}>Preț unitar</th>
-              <th style={{
-                padding: '12px',
-                textAlign: 'right',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                borderBottom: '1px solid #e0e0e0'
-              }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((product, index) => (
-              <tr key={product.id} style={{
-                borderBottom: index < products.length - 1 ? '1px solid #e0e0e0' : 'none'
-              }}>
-                <td style={{ padding: '12px', fontSize: '14px' }}>
-                  {product.nume}
+      {/* Rezumat produse */}
+      <div className="rd-card">
+        <h4 className="rd-card-title">Produse selectate pentru retur</h4>
+
+        <ul className="rd-products">
+          {selectedProducts.map((product) => {
+            const cantitate = product.cantitateReturnata || (product.selected ? product.cantitate : 0)
+            const lineTotal = product.pret * cantitate
+            return (
+              <li key={product.id} className="rd-product">
+                <div className="rd-product-main">
+                  <div className="rd-product-name">{product.nume}</div>
                   {product.motivRetur && product.motivRetur.trim().length > 0 && (
-                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                      Motiv: {product.motivRetur}
-                    </div>
+                    <div className="rd-product-motiv">Motiv: {product.motivRetur}</div>
                   )}
-                </td>
-                <td style={{ padding: '12px', textAlign: 'center', fontSize: '14px' }}>
-                  {product.cantitateReturnata || (product.selected ? product.cantitate : 0)} buc
-                </td>
-                <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px' }}>
-                  {product.pret.toFixed(2)} RON
-                </td>
-                <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold' }}>
-                  {(product.pret * (product.cantitateReturnata || (product.selected ? product.cantitate : 0))).toFixed(2)} RON
-                </td>
-              </tr>
-            ))}
-            <tr style={{
-              backgroundColor: '#f5f5f5',
-              borderTop: '2px solid #e0e0e0'
-            }}>
-              <td colSpan={3} style={{
-                padding: '12px',
-                textAlign: 'right',
-                fontWeight: 'bold',
-                fontSize: '16px'
-              }}>
-                Total rambursare:
-              </td>
-              <td style={{
-                padding: '12px',
-                textAlign: 'right',
-                fontWeight: 'bold',
-                fontSize: '18px',
-                color: '#26a69a'
-              }}>
-                {totalRefund.toFixed(2)} RON
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                  <div className="rd-product-meta">
+                    {cantitate} buc × {product.pret.toFixed(2)} RON
+                  </div>
+                </div>
+                <div className="rd-product-total">{lineTotal.toFixed(2)} RON</div>
+              </li>
+            )
+          })}
+        </ul>
+
+        <div className="rd-total">
+          <span className="rd-total-label">Subtotal produse</span>
+          <span className="rd-total-value">{totalRefund.toFixed(2)} RON</span>
+        </div>
+        <p className="rd-total-hint">
+          Suma finală depinde de metoda de expediere aleasă în pasul următor.
+        </p>
       </div>
 
-      {/* Metodă rambursare */}
-      <div style={{ marginBottom: '24px' }}>
-        <label style={{
-          display: 'block',
-          fontWeight: 'bold',
-          marginBottom: '12px',
-          fontSize: '14px'
-        }}>
-        Metodă rambursare *
-        </label>
-        
-        {wasPaidWithCard ? (
-          // Două opțiuni când comanda a fost plătită cu cardul
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Opțiunea Card bancar (preselectată) */}
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                padding: '16px',
-                borderRadius: '8px',
-                border: metodaRambursare === 'card' ? '2px solid #26a69a' : '1px solid #e0e0e0',
-                backgroundColor: metodaRambursare === 'card' ? '#e8f5e9' : '#f5f5f5',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseOver={(e) => {
-                if (metodaRambursare !== 'card') {
-                  e.currentTarget.style.backgroundColor = '#f0f0f0'
-                }
-              }}
-              onMouseOut={(e) => {
-                if (metodaRambursare !== 'card') {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5'
-                }
-              }}
-            >
-              <input
-                type="radio"
-                name="metodaRambursare"
-                value="card"
-                checked={metodaRambursare === 'card'}
-                onChange={(e) => {
-                  setMetodaRambursare('card')
-                  setRefundPeCard(true)
-                }}
-                style={{
-                  marginRight: '12px',
-                  marginTop: '2px',
-                  width: '20px',
-                  height: '20px',
-                  cursor: 'pointer'
-                }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#26a69a" strokeWidth="2">
-                    <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
-                    <line x1="1" y1="10" x2="23" y2="10"/>
-                  </svg>
-                  <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#26a69a' }}>
-                    Card bancar
-                  </span>
-                </div>
-                <p style={{
-                  fontSize: '14px',
-                  color: '#666',
-                  marginTop: '4px',
-                  marginLeft: '32px'
-                }}>
-                  Refund direct pe cardul folosit la comandă. Rambursarea se va face automat pe cardul original.
-                </p>
-              </div>
-            </label>
-
-            {/* Opțiunea Cont bancar */}
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                padding: '16px',
-                borderRadius: '8px',
-                border: metodaRambursare === 'cont' ? '2px solid #26a69a' : '1px solid #e0e0e0',
-                backgroundColor: metodaRambursare === 'cont' ? '#e8f5e9' : '#f5f5f5',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseOver={(e) => {
-                if (metodaRambursare !== 'cont') {
-                  e.currentTarget.style.backgroundColor = '#f0f0f0'
-                }
-              }}
-              onMouseOut={(e) => {
-                if (metodaRambursare !== 'cont') {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5'
-                }
-              }}
-            >
-              <input
-                type="radio"
-                name="metodaRambursare"
-                value="cont"
-                checked={metodaRambursare === 'cont'}
-                onChange={(e) => {
-                  setMetodaRambursare('cont')
-                  setRefundPeCard(false)
-                }}
-                style={{
-                  marginRight: '12px',
-                  marginTop: '2px',
-                  width: '20px',
-                  height: '20px',
-                  cursor: 'pointer'
-                }}
-              />
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                  Cont bancar
-                </span>
-                <p style={{
-                  fontSize: '14px',
-                  color: '#666',
-                  marginTop: '4px'
-                }}>
-                  Rambursarea se va face prin transfer bancar în contul indicat mai jos.
-                </p>
-              </div>
-            </label>
-          </div>
-        ) : (
-          // Doar cont bancar când comanda NU a fost plătită cu cardul
-          <div style={{
-            padding: '16px',
-            backgroundColor: '#f5f5f5',
-            borderRadius: '8px',
-            border: '1px solid #e0e0e0'
-          }}>
-            <span style={{ fontSize: '16px', fontWeight: 'bold' }}>Cont bancar</span>
-            <p style={{
-              fontSize: '14px',
-              color: '#666',
-              marginTop: '8px'
-            }}>
-              Rambursarea se va face prin transfer bancar în contul indicat mai jos.
+      {/* Metoda de rambursare — informativă, fără alegere */}
+      <div className="rd-section">
+        <div className="rd-method rd-method-active rd-method-static">
+          <div className="rd-method-body">
+            <div className="rd-method-head">
+              <span className="rd-method-icon" aria-hidden="true">{wasPaidWithCard ? '💳' : '🏦'}</span>
+              <span className="rd-method-title">
+                {wasPaidWithCard ? 'Refund pe cardul original' : 'Transfer în cont bancar'}
+              </span>
+            </div>
+            <p className="rd-method-text">
+              {wasPaidWithCard
+                ? 'Comanda a fost plătită cu cardul, așa că rambursarea se face automat pe același card. Nu mai e nevoie de alte date din partea ta.'
+                : 'Comanda a fost plătită ramburs/transfer, așa că rambursarea se face prin transfer bancar — completează IBAN-ul mai jos.'}
             </p>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Detalii cont bancar - afișat doar când se selectează cont bancar */}
+      {/* Detalii cont bancar */}
       {metodaRambursare === 'cont' && (
-        <>
-              {/* Notificare discretă când comanda a fost plătită cu cardul */}
-              {wasPaidWithCard && (
-                <div style={{
-                  marginBottom: '20px',
-                  padding: '12px 16px',
-                  backgroundColor: '#e3f2fd',
-                  border: '1px solid #90caf9',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  color: '#1565c0',
-                  lineHeight: '1.5'
-                }}>
-                  <strong>ℹ️ Informație:</strong> Am observat că această comandă a fost plătită cu cardul. Dacă dorești, poți alege transfer bancar în contul indicat mai jos.
-                </div>
+        <div className="rd-fadein">
+          <div className="rd-field">
+            <label className="rd-label" htmlFor="rd-iban">
+              <span className="rd-label-icon" aria-hidden="true">🏦</span>
+              IBAN
+              <span className="rd-required">*</span>
+            </label>
+            <div className={`rd-input-wrap ${ibanError ? 'rd-error-state' : isIbanValid ? 'rd-valid-state' : ''}`}>
+              <input
+                id="rd-iban"
+                type="text"
+                value={iban}
+                onChange={handleIbanChange}
+                placeholder="ROxxxxxxxxxxxxxxxxxxxxxx"
+                inputMode="text"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                maxLength={34}
+                className="rd-input rd-input-mono"
+              />
+              {isIbanValid && !ibanError && (
+                <span className="rd-check" aria-hidden="true">✓</span>
               )}
+            </div>
+            {ibanError ? (
+              <p className="rd-hint rd-hint-error">{ibanError}</p>
+            ) : (
+              <p className="rd-hint">24 de caractere, începe cu RO</p>
+            )}
+          </div>
 
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{
-                  display: 'block',
-                  fontWeight: 'bold',
-                  marginBottom: '8px',
-                  fontSize: '14px'
-                }}>
-                  IBAN
-                </label>
-                <input
-                  type="text"
-                  value={iban}
-                  onChange={handleIbanChange}
-                  placeholder="ROxxxxxxxxxxx"
-                  required
-                  maxLength={34} // Permite atât cu spații cât și fără
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    borderRadius: '8px',
-                    border: ibanError ? '2px solid #f44336' : '1px solid #e0e0e0',
-                    fontSize: '14px',
-                    outline: 'none',
-                    fontFamily: 'monospace',
-                    letterSpacing: '1px'
-                  }}
-                />
-                {ibanError && (
-                  <p style={{
-                    fontSize: '12px',
-                    color: '#f44336',
-                    marginTop: '4px'
-                  }}>
-                    {ibanError}
-                  </p>
+          <div className="rd-field">
+            <label className="rd-label" htmlFor="rd-titular">
+              <span className="rd-label-icon" aria-hidden="true">👤</span>
+              Titularul contului
+              <span className="rd-required">*</span>
+            </label>
+            <div className={`rd-input-wrap ${numeTitularError ? 'rd-error-state' : isNumeTitularValid ? 'rd-valid-state' : ''}`}>
+              <input
+                id="rd-titular"
+                type="text"
+                value={numeTitular}
+                onChange={(e) => {
+                  setNumeTitular(e.target.value)
+                  if (numeTitularError) setNumeTitularError(null)
+                }}
+                placeholder="Nume Prenume"
+                inputMode="text"
+                autoComplete="name"
+                className="rd-input"
+              />
+              {isNumeTitularValid && !numeTitularError && (
+                <span className="rd-check" aria-hidden="true">✓</span>
+              )}
+            </div>
+            {numeTitularError ? (
+              <p className="rd-hint rd-hint-error">{numeTitularError}</p>
+            ) : (
+              <p className="rd-hint">Numele complet așa cum apare la bancă</p>
+            )}
+          </div>
+
+          {/* Cui aparține contul — radio real, nu două checkbox-uri */}
+          <div className="rd-section">
+            <p className="rd-section-label">Cui aparține contul?</p>
+
+            <label className={`rd-owner ${contulEsteAlMeu === true ? 'rd-owner-active' : ''}`}>
+              <input
+                type="radio"
+                name="proprietarCont"
+                checked={contulEsteAlMeu === true}
+                onChange={() => {
+                  setContulEsteAlMeu(true)
+                  setAcordPrevederiLegale(false)
+                  setAcordError(null)
+                  setProprietarError(null)
+                  setNumeTitularError(null)
+                  if (orderData?.nume) setNumeTitular(orderData.nume)
+                }}
+                className="rd-owner-radio"
+              />
+              <div className="rd-owner-body">
+                <span className="rd-owner-title">Contul este al meu</span>
+                {orderData?.nume && (
+                  <span className="rd-owner-sub">{orderData.nume}</span>
                 )}
               </div>
+            </label>
 
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{
-                  display: 'block',
-                  fontWeight: 'bold',
-                  marginBottom: '8px',
-                  fontSize: '14px'
-                }}>
-                  Titularul contului (obligatoriu)
-                </label>
+            <label className={`rd-owner ${contulEsteAlMeu === false ? 'rd-owner-active' : ''}`}>
+              <input
+                type="radio"
+                name="proprietarCont"
+                checked={contulEsteAlMeu === false}
+                onChange={() => {
+                  setContulEsteAlMeu(false)
+                  setNumeTitular('')
+                  setProprietarError(null)
+                  setNumeTitularError(null)
+                }}
+                className="rd-owner-radio"
+              />
+              <div className="rd-owner-body">
+                <span className="rd-owner-title">Transfer către altă persoană</span>
+                <span className="rd-owner-sub">Cont pe alt nume — necesită acord legal</span>
+              </div>
+            </label>
+          </div>
+
+          {contulEsteAlMeu === false && (
+            <div className="rd-legal rd-fadein">
+              <label className="rd-legal-label">
                 <input
-                  type="text"
-                  value={numeTitular}
+                  type="checkbox"
+                  checked={acordPrevederiLegale}
                   onChange={(e) => {
-                    setNumeTitular(e.target.value)
-                    // Șterge eroarea când utilizatorul începe să scrie
-                    if (numeTitularError) {
-                      setNumeTitularError(null)
-                    }
+                    setAcordPrevederiLegale(e.target.checked)
+                    if (e.target.checked) setAcordError(null)
                   }}
-                  placeholder="Nume complet al titularului contului"
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    borderRadius: '8px',
-                    border: numeTitularError ? '1px solid #f44336' : '1px solid #e0e0e0',
-                    fontSize: '14px',
-                    outline: 'none'
-                  }}
+                  className="rd-legal-checkbox"
                 />
-                {numeTitularError && (
-                  <p style={{
-                    color: '#f44336',
-                    fontSize: '12px',
-                    marginTop: '4px',
-                    marginBottom: 0
-                  }}>
-                    {numeTitularError}
-                  </p>
-                )}
-              </div>
-
-              {/* Checkbox: Contul este al meu sau al altcuiva */}
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  cursor: 'pointer',
-                  padding: '12px',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  backgroundColor: '#fff'
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={contulEsteAlMeu}
-                    onChange={(e) => {
-                      setContulEsteAlMeu(e.target.checked)
-                      if (e.target.checked) {
-                        setAcordPrevederiLegale(false)
-                        // Preumple numele din comandă dacă este disponibil
-                        if (orderData?.nume) {
-                          setNumeTitular(orderData.nume)
-                        }
-                      }
-                    }}
-                    style={{
-                      marginRight: '12px',
-                      marginTop: '2px',
-                      width: '20px',
-                      height: '20px',
-                      cursor: 'pointer'
-                    }}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                      Contul este al meu ({orderData?.nume || 'N/A'})
-                    </span>
-                  </div>
-                </label>
-
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  cursor: 'pointer',
-                  padding: '12px',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  backgroundColor: '#fff',
-                  marginTop: '8px'
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={!contulEsteAlMeu}
-                    onChange={(e) => {
-                      setContulEsteAlMeu(!e.target.checked)
-                      if (e.target.checked) {
-                        setNumeTitular('')
-                      }
-                    }}
-                    style={{
-                      marginRight: '12px',
-                      marginTop: '2px',
-                      width: '20px',
-                      height: '20px',
-                      cursor: 'pointer'
-                    }}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                      Transfer către altă persoană
-                    </span>
-                  </div>
-                </label>
-              </div>
-
-              {/* Acord prevederi legale pentru transfer către altă persoană */}
-              {!contulEsteAlMeu && (
-                <div style={{
-                  marginBottom: '24px',
-                  padding: '16px',
-                  backgroundColor: '#fff3e0',
-                  border: '1px solid #ff9800',
-                  borderRadius: '8px'
-                }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    cursor: 'pointer'
-                  }}>
-                    <input
-                      type="checkbox"
-                      checked={acordPrevederiLegale}
-                      onChange={(e) => setAcordPrevederiLegale(e.target.checked)}
-                      required={!contulEsteAlMeu}
-                      style={{
-                        marginRight: '12px',
-                        marginTop: '2px',
-                        width: '20px',
-                        height: '20px',
-                        cursor: 'pointer'
-                      }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#e65100' }}>
-                        Sunt de acord cu toate prevederile legale *
-                      </span>
-                      <p style={{
-                        fontSize: '12px',
-                        color: '#666',
-                        marginTop: '4px'
-                      }}>
-                        Confirm că transferul către o altă persoană este efectuat în conformitate cu legislația în vigoare 
-                        și sunt de acord cu toate prevederile legale aplicabile.
-                      </p>
-                    </div>
-                  </label>
+                <div className="rd-legal-body">
+                  <span className="rd-legal-title">Sunt de acord cu prevederile legale *</span>
+                  <span className="rd-legal-text">
+                    Confirm că transferul către o altă persoană este efectuat în conformitate cu legislația în vigoare.
+                  </span>
                 </div>
-              )}
-          </>
+              </label>
+            </div>
+          )}
+        </div>
       )}
 
-
       {/* Butoane navigare */}
-      <div style={{
-        display: 'flex',
-        gap: '12px'
-      }}>
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            flex: 1,
-            padding: '16px',
-            borderRadius: '8px',
-            backgroundColor: '#e0e0e0',
-            color: '#333',
-            border: 'none',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            transition: 'background-color 0.2s ease'
-          }}
-          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#d0d0d0'}
-          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#e0e0e0'}
-        >
+      <div className="rd-actions">
+        <button type="button" onClick={onBack} className="rd-back">
           ÎNAPOI
         </button>
-        <button
-          type="submit"
-          style={{
-            flex: 1,
-            padding: '16px',
-            borderRadius: '8px',
-            background: 'linear-gradient(90deg, #2196F3 0%, #4CAF50 100%)',
-            color: '#fff',
-            border: 'none',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            textTransform: 'uppercase',
-            cursor: 'pointer',
-            transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)'
-            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)'
-            e.currentTarget.style.boxShadow = 'none'
-          }}
-        >
+        <button type="submit" className="rd-cta">
           CONTINUĂ
+          <span className="rd-cta-arrow" aria-hidden="true">→</span>
         </button>
       </div>
+
+      <style jsx>{`
+        .rd-form {
+          max-width: 560px;
+          margin: 0 auto;
+        }
+
+        .rd-header {
+          text-align: center;
+          margin-bottom: 24px;
+        }
+        .rd-header-icon {
+          font-size: 40px;
+          margin-bottom: 8px;
+        }
+        .rd-title {
+          font-size: 22px;
+          font-weight: 700;
+          color: #1a1a1a;
+          margin: 0 0 6px 0;
+          letter-spacing: -0.02em;
+        }
+        .rd-subtitle {
+          font-size: 14px;
+          color: #6b7280;
+          margin: 0;
+        }
+        @media (min-width: 481px) {
+          .rd-title { font-size: 26px; }
+          .rd-subtitle { font-size: 15px; }
+        }
+
+        .rd-error-slot {
+          min-height: 0;
+          margin-bottom: 0;
+          transition: min-height 0.25s ease, margin-bottom 0.25s ease;
+        }
+        .rd-error-show {
+          min-height: 56px;
+          margin-bottom: 8px;
+        }
+        .rd-error {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          padding: 12px 14px;
+          background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
+          border: 1px solid #fecaca;
+          border-radius: 10px;
+          color: #b91c1c;
+          font-size: 14px;
+          line-height: 1.5;
+          animation: rd-fadein 0.3s ease;
+        }
+        .rd-error-icon { flex-shrink: 0; }
+
+        /* Card produse */
+        .rd-card {
+          padding: 18px 18px 16px 18px;
+          background: #fafafa;
+          border: 1px solid #f0f0f0;
+          border-radius: 12px;
+          margin-bottom: 22px;
+        }
+        .rd-card-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #374151;
+          margin: 0 0 12px 0;
+          letter-spacing: 0.01em;
+        }
+        .rd-products {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+        }
+        .rd-product {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          padding: 12px 0;
+          border-bottom: 1px solid #eef2f4;
+        }
+        .rd-product:last-child {
+          border-bottom: none;
+        }
+        .rd-product-main { flex: 1; min-width: 0; }
+        .rd-product-name {
+          font-size: 14px;
+          font-weight: 600;
+          color: #111827;
+          line-height: 1.35;
+        }
+        .rd-product-motiv {
+          font-size: 12px;
+          color: #6b7280;
+          margin-top: 3px;
+        }
+        .rd-product-meta {
+          font-size: 12px;
+          color: #9ca3af;
+          margin-top: 4px;
+        }
+        .rd-product-total {
+          font-size: 14px;
+          font-weight: 700;
+          color: #111827;
+          white-space: nowrap;
+        }
+        .rd-total {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 14px;
+          padding-top: 14px;
+          border-top: 2px solid #e5e7eb;
+        }
+        .rd-total-label {
+          font-size: 14px;
+          font-weight: 700;
+          color: #374151;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        .rd-total-value {
+          font-size: 22px;
+          font-weight: 800;
+          color: #26a69a;
+        }
+        .rd-total-hint {
+          font-size: 12px;
+          color: #9ca3af;
+          margin: 8px 0 0 0;
+          line-height: 1.4;
+          font-style: italic;
+        }
+
+        /* Section */
+        .rd-section { margin-bottom: 22px; }
+        .rd-section-label {
+          font-size: 13px;
+          font-weight: 700;
+          color: #374151;
+          margin: 0 0 10px 0;
+          letter-spacing: 0.01em;
+        }
+
+        /* Metoda */
+        .rd-method-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .rd-method {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          padding: 14px 16px;
+          border-radius: 12px;
+          border: 1.5px solid #e5e7eb;
+          background: #fff;
+          cursor: pointer;
+          transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .rd-method:hover {
+          border-color: #cbd5e1;
+        }
+        .rd-method-active {
+          border-color: #26a69a;
+          background: linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%);
+          box-shadow: 0 0 0 4px rgba(38, 166, 154, 0.10);
+        }
+        .rd-method-static { cursor: default; }
+        .rd-method-static:hover { border-color: #26a69a; }
+        .rd-method-radio {
+          margin: 4px 0 0 0;
+          width: 18px;
+          height: 18px;
+          accent-color: #26a69a;
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        .rd-method-body { flex: 1; min-width: 0; }
+        .rd-method-head {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 4px;
+        }
+        .rd-method-icon { font-size: 18px; }
+        .rd-method-title {
+          font-size: 15px;
+          font-weight: 700;
+          color: #111827;
+        }
+        .rd-method-text {
+          font-size: 13px;
+          color: #6b7280;
+          margin: 0;
+          line-height: 1.45;
+        }
+
+        /* Field — same visual language as os- */
+        .rd-field { margin-bottom: 18px; }
+        .rd-label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-weight: 600;
+          font-size: 13px;
+          color: #374151;
+          margin-bottom: 8px;
+          letter-spacing: 0.01em;
+        }
+        .rd-label-icon { font-size: 15px; }
+        .rd-required { color: #ef4444; margin-left: 2px; }
+
+        .rd-input-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+          border: 1.5px solid #e5e7eb;
+          border-radius: 10px;
+          background: #fff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .rd-input-wrap:focus-within {
+          border-color: #26a69a;
+          box-shadow: 0 0 0 4px rgba(38, 166, 154, 0.12);
+        }
+        .rd-input-wrap.rd-error-state {
+          border-color: #ef4444;
+          box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.10);
+        }
+        .rd-input-wrap.rd-valid-state {
+          border-color: #26a69a;
+        }
+        .rd-input {
+          flex: 1;
+          width: 100%;
+          padding: 13px 14px;
+          border: none;
+          background: transparent;
+          font-size: 16px;
+          color: #111827;
+          outline: none;
+          border-radius: 10px;
+        }
+        .rd-input::placeholder { color: #9ca3af; }
+        .rd-input-mono {
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          letter-spacing: 1px;
+        }
+        .rd-check {
+          color: #26a69a;
+          font-weight: 700;
+          font-size: 18px;
+          padding-right: 14px;
+          animation: rd-pop 0.25s ease;
+        }
+        .rd-hint {
+          font-size: 12px;
+          color: #9ca3af;
+          margin: 6px 0 0 0;
+          line-height: 1.4;
+        }
+        .rd-hint-error { color: #ef4444; }
+
+        /* Owner radio cards */
+        .rd-owner {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+          padding: 12px 14px;
+          border-radius: 10px;
+          border: 1.5px solid #e5e7eb;
+          background: #fff;
+          cursor: pointer;
+          margin-bottom: 8px;
+          transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+        .rd-owner:last-child { margin-bottom: 0; }
+        .rd-owner:hover { border-color: #cbd5e1; }
+        .rd-owner-active {
+          border-color: #26a69a;
+          background: #f0fdfa;
+        }
+        .rd-owner-radio {
+          width: 18px;
+          height: 18px;
+          accent-color: #26a69a;
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        .rd-owner-body {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .rd-owner-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #111827;
+        }
+        .rd-owner-sub {
+          font-size: 12px;
+          color: #6b7280;
+        }
+
+        /* Legal */
+        .rd-legal {
+          margin-top: 12px;
+          padding: 14px 16px;
+          background: #fff7ed;
+          border: 1px solid #fed7aa;
+          border-radius: 10px;
+        }
+        .rd-legal-label {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          cursor: pointer;
+        }
+        .rd-legal-checkbox {
+          margin-top: 2px;
+          width: 18px;
+          height: 18px;
+          accent-color: #ea580c;
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        .rd-legal-body { display: flex; flex-direction: column; gap: 4px; }
+        .rd-legal-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #c2410c;
+        }
+        .rd-legal-text {
+          font-size: 12px;
+          color: #7c2d12;
+          line-height: 1.45;
+        }
+
+        /* Actions */
+        .rd-actions {
+          display: flex;
+          gap: 10px;
+          margin-top: 24px;
+        }
+        .rd-back {
+          flex: 1;
+          padding: 14px 16px;
+          border-radius: 12px;
+          background: transparent;
+          color: #6b7280;
+          border: 1px solid #e5e7eb;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          letter-spacing: 0.04em;
+        }
+        .rd-back:hover {
+          background: #f9fafb;
+          border-color: #d1d5db;
+          color: #374151;
+        }
+        .rd-cta {
+          flex: 2;
+          padding: 16px 20px;
+          border: none;
+          border-radius: 12px;
+          background: linear-gradient(90deg, #2196f3 0%, #4caf50 100%);
+          color: #fff;
+          font-size: 15px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          box-shadow: 0 4px 14px rgba(33, 150, 243, 0.25);
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .rd-cta:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 22px rgba(33, 150, 243, 0.32);
+        }
+        .rd-cta:active {
+          transform: translateY(0);
+          box-shadow: 0 2px 8px rgba(33, 150, 243, 0.25);
+        }
+        .rd-cta-arrow {
+          font-size: 18px;
+          transition: transform 0.2s ease;
+        }
+        .rd-cta:hover .rd-cta-arrow { transform: translateX(4px); }
+
+        .rd-fadein { animation: rd-fadein 0.25s ease; }
+
+        @keyframes rd-fadein {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes rd-pop {
+          from { transform: scale(0.6); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
     </form>
   )
 }

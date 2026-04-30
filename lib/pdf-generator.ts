@@ -83,7 +83,19 @@ export async function generateReturnPDF(
 
   pdf.setFont('helvetica', 'normal')
   pdf.setFontSize(10)
+
+  const subtotalProduse = returnData.refundData.subtotalProduse
+  const costTransport = returnData.refundData.costTransport || 0
+
+  if (typeof subtotalProduse === 'number') {
+    pdf.text(`Subtotal Products: ${subtotalProduse.toFixed(2)} RON`, margin, yPosition)
+    yPosition += 6
+    pdf.text(`Shipping Cost: ${costTransport > 0 ? '-' + costTransport.toFixed(2) : '0.00'} RON`, margin, yPosition)
+    yPosition += 6
+  }
+  pdf.setFont('helvetica', 'bold')
   pdf.text(`Total Refund: ${returnData.totalRefund.toFixed(2)} RON`, margin, yPosition)
+  pdf.setFont('helvetica', 'normal')
   yPosition += 6
 
   if (returnData.refundData.iban) {
@@ -94,7 +106,33 @@ export async function generateReturnPDF(
     pdf.text(`Account Holder: ${returnData.refundData.numeTitular}`, margin, yPosition)
     yPosition += 6
   }
-  yPosition += 10
+  yPosition += 6
+
+  // Shipping Method Section
+  const metodaTrimitere = returnData.refundData.metodaTrimitere
+  if (metodaTrimitere) {
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(12)
+    pdf.text('Shipping Method:', margin, yPosition)
+    yPosition += 8
+
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(10)
+    const methodLabel: Record<string, string> = {
+      curier: 'Courier pickup at customer address',
+      manual: 'Manual (customer ships with chosen courier)',
+    }
+    pdf.text(methodLabel[metodaTrimitere] || metodaTrimitere, margin, yPosition)
+    yPosition += 6
+
+    if (returnData.awbNumber) {
+      pdf.setFont('helvetica', 'bold')
+      pdf.text(`AWB SameDay: ${returnData.awbNumber}`, margin, yPosition)
+      pdf.setFont('helvetica', 'normal')
+      yPosition += 6
+    }
+    yPosition += 4
+  }
 
   // Signature Section
   pdf.setFont('helvetica', 'bold')
@@ -156,9 +194,11 @@ export async function generateReturnPDF(
   pdf.setFontSize(9)
   const notes = [
     'Package must be sent with COD 0 (mandatory)',
-    'Shipping cost is fully covered by the customer',
-    'Products must be properly packaged',
-    'Return address: maxari, Anghel I. Saligny Street 40, CT Park Cargo Terminal, Oradea, 410085, Bihor, Romania',
+    metodaTrimitere === 'manual'
+      ? 'Customer chooses any courier and pays shipping directly — full refund applies'
+      : 'Shipping cost is deducted from the refund total (see above)',
+    'Products must be properly packaged with original tags intact',
+    'Return address: RED MAXARI, Soseaua Sibiului nr. 11, Medias, 551129, Sibiu, Romania (Tel: +40770404859)',
   ]
 
   notes.forEach(note => {

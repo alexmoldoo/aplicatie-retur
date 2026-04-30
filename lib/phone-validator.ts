@@ -46,6 +46,37 @@ export function isValidRomanianPhone(phone: string): boolean {
 }
 
 /**
+ * Formatează numărul de telefon în timp ce utilizatorul tastează
+ * Ex: "0712345678" → "0712 345 678", "+40712345678" → "+40 712 345 678"
+ */
+export function formatPhoneAsTyped(value: string): string {
+  if (!value) return ''
+
+  let cleaned = value.replace(/[^\d+]/g, '')
+
+  if (cleaned.startsWith('+')) {
+    cleaned = '+' + cleaned.substring(1).replace(/\+/g, '')
+  }
+
+  if (cleaned.startsWith('+40')) {
+    const digits = cleaned.substring(3).slice(0, 9)
+    if (digits.length === 0) return '+40'
+    if (digits.length <= 3) return `+40 ${digits}`
+    if (digits.length <= 6) return `+40 ${digits.substring(0, 3)} ${digits.substring(3)}`
+    return `+40 ${digits.substring(0, 3)} ${digits.substring(3, 6)} ${digits.substring(6)}`
+  }
+
+  if (cleaned.startsWith('0')) {
+    const digits = cleaned.slice(0, 10)
+    if (digits.length <= 4) return digits
+    if (digits.length <= 7) return `${digits.substring(0, 4)} ${digits.substring(4)}`
+    return `${digits.substring(0, 4)} ${digits.substring(4, 7)} ${digits.substring(7)}`
+  }
+
+  return cleaned
+}
+
+/**
  * Normalizează numărul de telefon pentru afișare
  */
 export function normalizePhoneForDisplay(phone: string): string {

@@ -9,6 +9,16 @@ import RefundDetailsStep from './RefundDetailsStep'
 import InformationStep from './InformationStep'
 import SignaturePopup from './SignaturePopup'
 
+export interface ShippingAddress {
+  nume: string
+  telefon: string
+  strada: string
+  oras: string
+  judet: string
+  codPostal: string
+  tara: string
+}
+
 export interface OrderData {
   nume: string
   numarComanda: string
@@ -17,6 +27,7 @@ export interface OrderData {
   orderId?: string
   paymentMethod?: string // Metoda de plată (ex: "card", "bank_transfer", etc.)
   wasPaidWithCard?: boolean // Dacă a fost plătită cu cardul
+  shippingAddress?: ShippingAddress // Adresa de livrare a comenzii (pentru pickup AWB SameDay)
   products?: Array<{
     id: string
     nume: string
@@ -50,6 +61,9 @@ export interface RefundData {
   contulEsteAlMeu?: boolean // Dacă contul este al clientului sau al altcuiva
   acordPrevederiLegale?: boolean // Acord pentru transfer către altă persoană
   documente: File[]
+  // Pas 5 — metoda de expediere a coletului către magazin
+  metodaTrimitere?: 'curier' | 'manual'
+  costTransport?: number       // 0 pentru manual, 15.99 pentru curier
 }
 
 export default function ReturnProcess() {
@@ -59,6 +73,7 @@ export default function ReturnProcess() {
   const [refundData, setRefundData] = useState<RefundData | null>(null)
   const [shopTitle, setShopTitle] = useState('MAXARI.RO')
   const [foundOrders, setFoundOrders] = useState<any[]>([]) // Comenzile găsite în step 1
+  const [sessionToken, setSessionToken] = useState<string | null>(null) // Token sesiune client după Pas 1
   const [showSignaturePopup, setShowSignaturePopup] = useState(false) // Control pentru pop-up semnătură
 
   useEffect(() => {
@@ -100,11 +115,21 @@ export default function ReturnProcess() {
   // Callback când se găsesc comenzi în step 1 - trece automat la step 2
   const handleOrdersFound = (orders: any[]) => {
     setFoundOrders(orders)
-    setCurrentStep(2) // Trece automat la step 2 pentru a afișa comenzile
+    // F3 — Auto-skip: dacă există DOAR o comandă și e eligibilă, sărim direct la pas 3
+    if (orders.length === 1 && orders[0]?.eligibility?.status === 'eligible') {
+      handleSelectOrderFromList(orders[0])
+      return
+    }
+    setCurrentStep(2) // altfel afișează lista pentru selecție
   }
 
   // Callback când se selectează o comandă din step 2
   const handleSelectOrderFromList = (selectedOrder: any) => {
+    // Salvează tokenul de sesiune asociat comenzii alese (folosit la /api/returns/create)
+    if (selectedOrder.sessionToken) {
+      setSessionToken(selectedOrder.sessionToken)
+    }
+
     // Pregătește datele comenzii selectate
     const data: OrderData = {
       nume: selectedOrder.nume,
@@ -114,6 +139,7 @@ export default function ReturnProcess() {
       orderId: selectedOrder.id,
       paymentMethod: selectedOrder.paymentMethod,
       wasPaidWithCard: selectedOrder.wasPaidWithCard,
+      shippingAddress: selectedOrder.shippingAddress,
       products: selectedOrder.products,
     }
     setOrderData(data)
@@ -150,23 +176,49 @@ export default function ReturnProcess() {
     setCurrentStep(5) // Mergi la step 5 (informații)
   }
 
-  const handleInformationSubmit = () => {
-    // Deschide pop-up-ul cu semnătură în loc de alert
-    // Returul se creează DOAR după semnătură + generare PDF
+  const handleInformationSubmit = (shippingInfo: {
+    metodaTrimitere: 'curier' | 'manual'
+    costTransport: number
+    pickupContact?: ShippingAddress & { email?: string }
+  }) => {
+    // Mergem mai departe DOAR dacă datele sunt complete
     if (orderData && products.length > 0 && refundData) {
+      // Suprascriem `shippingAddress` cu valoarea editată de client în Pas 5,
+      // ca SignaturePopup → /api/returns/create să trimită exact ce a confirmat clientul.
+      if (shippingInfo.pickupContact) {
+        const { email, ...addr } = shippingInfo.pickupContact
+        setOrderData({
+          ...orderData,
+          shippingAddress: addr,
+          email: email || orderData.email,
+        })
+      }
+      // Salvăm metoda de trimitere pe refundData
+      setRefundData({
+        ...refundData,
+        metodaTrimitere: shippingInfo.metodaTrimitere,
+        costTransport: shippingInfo.costTransport,
+      })
       setShowSignaturePopup(true)
     } else {
-      alert('Date incomplete. Vă rugăm să completați toate pașii.')
+      alert('Date incomplete. Vă rugăm să completați toți pașii.')
     }
   }
 
+  // Închidere după generare PDF (success) — resetează tot procesul
   const handleSignaturePopupClose = () => {
     setShowSignaturePopup(false)
-    // După închiderea pop-up-ului (după generare PDF), resetează procesul
     setCurrentStep(1)
     setOrderData(null)
     setProducts([])
     setRefundData(null)
+    setSessionToken(null)
+    setFoundOrders([])
+  }
+
+  // Înapoi la Pas 5 — închide doar popup-ul, păstrează datele intacte
+  const handleSignaturePopupBack = () => {
+    setShowSignaturePopup(false)
   }
 
   return (
@@ -255,9 +307,12 @@ export default function ReturnProcess() {
           />
         )}
         {currentStep === 5 && (
-          <InformationStep 
+          <InformationStep
             onSubmit={handleInformationSubmit}
             onBack={() => setCurrentStep(4)}
+            products={products}
+            initialShipping={orderData?.shippingAddress}
+            customerEmail={orderData?.email}
           />
         )}
       </div>
@@ -267,9 +322,11 @@ export default function ReturnProcess() {
         <SignaturePopup
           isOpen={showSignaturePopup}
           onClose={handleSignaturePopupClose}
+          onBack={handleSignaturePopupBack}
           orderData={orderData}
           products={products}
           refundData={refundData}
+          sessionToken={sessionToken}
         />
       )}
     </div>

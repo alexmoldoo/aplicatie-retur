@@ -12,12 +12,26 @@ export interface ShopifyOrder {
     first_name: string
     last_name: string
   }
+  shipping_address?: {
+    name?: string
+    first_name?: string
+    last_name?: string
+    address1?: string
+    address2?: string
+    city?: string
+    province?: string
+    province_code?: string
+    zip?: string
+    country?: string
+    phone?: string
+  }
   line_items: Array<{
     id: string
     title: string
     quantity: number
     price: string
     variant_id: string
+    product_id?: string | number
     sku?: string
     variant_title?: string
     discount_allocations?: Array<{
@@ -581,32 +595,51 @@ function wasPaidWithCard(order: ShopifyOrder): boolean {
  * Convertește o comandă Shopify în formatul aplicației
  */
 export function convertShopifyOrderToAppFormat(order: ShopifyOrder) {
+  const ship = order.shipping_address
+  const shipName = ship?.name || [ship?.first_name, ship?.last_name].filter(Boolean).join(' ').trim()
+  const shippingAddress = ship ? {
+    nume: shipName || (order.billing_address.name || `${order.billing_address.first_name} ${order.billing_address.last_name}`),
+    telefon: ship.phone || order.phone || '',
+    strada: [ship.address1, ship.address2].filter(Boolean).join(', '),
+    oras: ship.city || '',
+    judet: ship.province || ship.province_code || '',
+    codPostal: ship.zip || '',
+    tara: ship.country || '',
+  } : undefined
+
   return {
     id: order.id,
     nume: order.billing_address.name || `${order.billing_address.first_name} ${order.billing_address.last_name}`,
     numarComanda: order.name,
-    telefon: order.phone || '',
+    telefon: order.phone || ship?.phone || '',
     email: order.email,
+    shippingAddress,
     paymentMethod: order.payment_gateway_names?.[0] || order.payment_method || order.gateway || '',
     wasPaidWithCard: wasPaidWithCard(order),
     products: [
       // Produse normale din line_items
       ...order.line_items.map(item => {
-        // Calculează discount-ul pentru acest item
-        const itemDiscount = item.discount_allocations?.reduce((sum, disc) => sum + parseFloat(disc.amount || '0'), 0) || 0
-        const pretInitial = parseFloat(item.price) + itemDiscount // Prețul înainte de discount
-        const pretDupaDiscount = parseFloat(item.price) // Prețul după discount (cel returnat de Shopify)
-        
+        // Shopify returnează `item.price` ca preț unitar ÎNAINTE de discount-uri.
+        // discount_allocations conține discount-ul total alocat pe linie (toate unitățile).
+        // Pentru refund corect trebuie să folosim prețul efectiv plătit per unitate.
+        const itemDiscountTotal = item.discount_allocations?.reduce((sum, disc) => sum + parseFloat(disc.amount || '0'), 0) || 0
+        const qty = item.quantity || 1
+        const pretListatPerUnit = parseFloat(item.price)
+        const discountPerUnit = itemDiscountTotal / qty
+        const pretPlatitPerUnit = Math.max(0, pretListatPerUnit - discountPerUnit)
+
         return {
           id: item.id.toString(),
           nume: item.title,
           cantitate: item.quantity,
-          pret: pretDupaDiscount, // Prețul după discount
-          pretInitial: pretInitial, // Prețul inițial
-          discount: itemDiscount, // Valoarea discount-ului
+          pret: pretPlatitPerUnit, // Prețul efectiv plătit per unitate (DUPĂ discount)
+          pretInitial: pretListatPerUnit, // Prețul listat per unitate (ÎNAINTE de discount)
+          discount: discountPerUnit, // Discount per unitate
           variant_id: item.variant_id?.toString(),
+          product_id: item.product_id ? String(item.product_id) : undefined,
           sku: item.sku || '',
           variant_title: item.variant_title || '',
+          imagine: '' as string, // populat ulterior prin enrichOrdersWithProductImages
         }
       }),
       // Taxe de transport din shipping_lines
@@ -631,5 +664,93 @@ export function convertShopifyOrderToAppFormat(order: ShopifyOrder) {
  */
 export function convertShopifyOrdersToAppFormat(orders: ShopifyOrder[]) {
   return orders.map(order => convertShopifyOrderToAppFormat(order))
+}
+
+// Cache simplu pentru imagini (evită re-fetch în 5 minute)
+const imageCache = new Map<string, { url: string; expiresAt: number }>()
+const IMAGE_CACHE_TTL_MS = 5 * 60_000
+
+/**
+ * Aduce într-un singur apel imaginile pentru o listă de product_id-uri.
+ * Returnează Map<product_id, image_url>.
+ */
+export async function fetchProductImages(
+  productIds: string[],
+  shopifyDomain: string,
+  accessToken: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  const now = Date.now()
+  const toFetch: string[] = []
+
+  for (const id of productIds) {
+    if (!id) continue
+    const cached = imageCache.get(id)
+    if (cached && cached.expiresAt > now) {
+      result.set(id, cached.url)
+    } else {
+      toFetch.push(id)
+    }
+  }
+
+  if (toFetch.length === 0) return result
+
+  try {
+    const idsParam = toFetch.join(',')
+    const url = `https://${shopifyDomain}/admin/api/2024-01/products.json?ids=${idsParam}&fields=id,image,images&limit=250`
+    const response = await fetch(url, {
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!response.ok) {
+      console.warn('fetchProductImages failed:', response.status)
+      return result
+    }
+    const data = await response.json()
+    const products: Array<{ id: number | string; image?: { src?: string }; images?: Array<{ src?: string }> }> = data.products || []
+    for (const p of products) {
+      const src = p.image?.src || p.images?.[0]?.src || ''
+      const idStr = String(p.id)
+      if (src) {
+        result.set(idStr, src)
+        imageCache.set(idStr, { url: src, expiresAt: now + IMAGE_CACHE_TTL_MS })
+      }
+    }
+  } catch (err) {
+    console.warn('fetchProductImages exception:', err)
+  }
+
+  return result
+}
+
+/**
+ * Îmbogățește lista de comenzi convertite cu imaginile produselor.
+ * Mutează în loc — pentru simplitate.
+ */
+export async function enrichOrdersWithProductImages(
+  orders: ReturnType<typeof convertShopifyOrdersToAppFormat>,
+  shopifyDomain: string,
+  accessToken: string
+): Promise<void> {
+  const productIds = new Set<string>()
+  for (const order of orders) {
+    for (const p of order.products) {
+      const pid = (p as any).product_id
+      if (pid) productIds.add(String(pid))
+    }
+  }
+  if (productIds.size === 0) return
+
+  const images = await fetchProductImages(Array.from(productIds), shopifyDomain, accessToken)
+  for (const order of orders) {
+    for (const p of order.products) {
+      const pid = (p as any).product_id
+      if (pid && images.has(String(pid))) {
+        ;(p as any).imagine = images.get(String(pid))
+      }
+    }
+  }
 }
 

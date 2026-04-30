@@ -94,6 +94,10 @@ export interface Product {
 export interface RefundData {
   iban?: string // Doar IBAN și numeTitular (fără metodaRambursare)
   numeTitular?: string
+  // Metoda de expediere a coletului către magazin (din Pas 5)
+  metodaTrimitere?: 'curier' | 'manual'
+  costTransport?: number   // 0 manual, 15.99 curier
+  subtotalProduse?: number // Suma fără cost transport
 }
 
 export interface Return {

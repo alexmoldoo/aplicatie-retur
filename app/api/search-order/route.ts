@@ -1,31 +1,189 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { 
-  searchOrderByOrderNumber, 
-  searchOrdersByPhone, 
+import {
+  searchOrderByOrderNumber,
+  searchOrdersByPhone,
   searchOrdersByEmail,
-  convertShopifyOrdersToAppFormat 
+  convertShopifyOrdersToAppFormat,
+  enrichOrdersWithProductImages
 } from '@/lib/shopify'
 import { calculateEligibility } from '@/lib/eligibility'
 import { getConfig } from '@/lib/db'
 import { matchNames } from '@/lib/name-matcher'
+import { createCustomerToken } from '@/lib/customer-session'
+import { logAudit } from '@/lib/audit'
+import { getClientIp, makeRateLimiter, formatWaitTime } from '@/lib/security'
+import { isBlocked, recordFail } from '@/lib/ip-blocklist'
+import { isShopifyMock, findMockOrders } from '@/lib/mock-shopify'
+
+const HUMAN_MIN_FILL_TIME_MS = 1500 // sub atât → suspect bot
 
 export const dynamic = 'force-dynamic'
+
+// Rate limit: max 4 căutări / 5 minute / IP
+const checkRateLimit = makeRateLimiter({ max: 4, windowMs: 5 * 60_000 })
+
+// Cache rezultate: 60 secunde / același input
+const CACHE_TTL_MS = 60_000
+const cacheMap = new Map<string, { data: any; expiresAt: number }>()
+
+function makeCacheKey(p: { orderNumber?: string; phone?: string; fullName?: string; email?: string }): string {
+  return JSON.stringify({
+    o: (p.orderNumber || '').trim().toLowerCase(),
+    p: (p.phone || '').replace(/\s+/g, '').toLowerCase(),
+    n: (p.fullName || '').trim().toLowerCase(),
+    e: (p.email || '').trim().toLowerCase(),
+  })
+}
+
+function getCached(key: string): any | null {
+  const entry = cacheMap.get(key)
+  if (!entry) return null
+  if (entry.expiresAt < Date.now()) {
+    cacheMap.delete(key)
+    return null
+  }
+  return entry.data
+}
+
+function setCached(key: string, data: any): void {
+  cacheMap.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS })
+  // Curățare oportunistă: dacă map-ul crește prea mult, șterge intrările expirate
+  if (cacheMap.size > 500) {
+    const now = Date.now()
+    Array.from(cacheMap.entries()).forEach(([k, v]) => {
+      if (v.expiresAt < now) cacheMap.delete(k)
+    })
+  }
+}
 
 /**
  * API Route pentru căutarea comenzilor în Shopify
  * Validare strictă: nume+prenume obligatoriu, număr comandă SAU telefon SAU email obligatoriu
  */
 export async function POST(request: NextRequest) {
+  const ip = getClientIp(request)
+
   try {
+    // 0. Verifică dacă IP-ul e blocat (după prea multe eșecuri în trecut)
+    const block = isBlocked(ip)
+    if (block.blocked) {
+      await logAudit({ action: 'search_order_rate_limited', ip, details: { reason: 'ip_blocked', retryAfter: block.retryAfterSeconds } })
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'Acces temporar blocat din cauza prea multor încercări eșuate. Te rugăm să contactezi suportul dacă ai nevoie de ajutor.',
+        },
+        { status: 429, headers: { 'Retry-After': String(block.retryAfterSeconds || 0) } }
+      )
+    }
+
+    // Rate limit per IP
+    const rl = checkRateLimit(ip)
+    if (!rl.allowed) {
+      await logAudit({ action: 'search_order_rate_limited', ip, details: { retryAfter: rl.retryAfter } })
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Ai depășit numărul maxim de încercări. Te rugăm să aștepți ${formatWaitTime(rl.retryAfter)} înainte să încerci din nou.`,
+        },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rl.retryAfter) },
+        }
+      )
+    }
+
     const body = await request.json()
-    const { orderNumber, phone, fullName, email } = body
-    
-    console.log('Search order request:', { 
-      orderNumber: orderNumber || 'none', 
-      phone: phone || 'none', 
-      fullName: fullName || 'none', 
-      email: email || 'none' 
+    const { orderNumber, phone, fullName, email, _hp, _formStartedAt } = body
+
+    // Honeypot — câmp ascuns care nu trebuie completat decât de boți
+    if (_hp && String(_hp).trim().length > 0) {
+      recordFail(ip)
+      await logAudit({ action: 'search_order_fail', ip, details: { reason: 'honeypot_filled' } })
+      // Răspuns generic ca să nu dezvăluim că am detectat botul
+      return NextResponse.json({
+        success: false,
+        message: 'Comanda nu a fost găsită. Verifică datele introduse și încearcă din nou.',
+      })
+    }
+
+    // Detectare timp completare formular — sub 1.5s e suspect bot
+    if (typeof _formStartedAt === 'number' && _formStartedAt > 0) {
+      const elapsed = Date.now() - _formStartedAt
+      if (elapsed < HUMAN_MIN_FILL_TIME_MS && elapsed >= 0) {
+        recordFail(ip)
+        await logAudit({ action: 'search_order_fail', ip, details: { reason: 'too_fast', elapsedMs: elapsed } })
+        return NextResponse.json({
+          success: false,
+          message: 'Comanda nu a fost găsită. Verifică datele introduse și încearcă din nou.',
+        })
+      }
+    }
+
+    console.log('Search order request:', {
+      orderNumber: orderNumber || 'none',
+      phone: phone || 'none',
+      fullName: fullName || 'none',
+      email: email || 'none'
     })
+
+    // Helper: înregistrează eșec (pentru blocare după 19) și returnează mesaj generic
+    const failNotFound = (extra?: Record<string, any>) => {
+      const r = recordFail(ip)
+      if (r.newlyBlocked) {
+        logAudit({ action: 'search_order_rate_limited', ip, details: { reason: 'auto_blocked_after_fails', failCount: r.failCount } })
+      }
+      return NextResponse.json({
+        success: false,
+        message: 'Comanda nu a fost găsită. Verifică datele introduse și încearcă din nou.',
+        ...(extra || {}),
+      })
+    }
+
+    // Cache: dacă același input a fost căutat recent, returnează rezultatul cache
+    const cacheKey = makeCacheKey({ orderNumber, phone, fullName, email })
+    const cached = getCached(cacheKey)
+    if (cached) {
+      console.log('Cache hit for search-order:', cacheKey)
+      return NextResponse.json(cached)
+    }
+
+    // MOCK MODE — pentru test end-to-end fără Shopify real (SHOPIFY_MOCK=true)
+    if (isShopifyMock) {
+      console.log('SHOPIFY_MOCK active — searching in fixture data')
+      const mockOrders = findMockOrders({ orderNumber, phone, email, fullName })
+
+      if (mockOrders.length === 0) {
+        return failNotFound({ needsEmail: !email })
+      }
+
+      const baseOrders = convertShopifyOrdersToAppFormat(mockOrders)
+      const convertedOrders = baseOrders.map(order => ({
+        ...order,
+        eligibility: calculateEligibility(order.dataComanda),
+        sessionToken: createCustomerToken({
+          orderId: String(order.id),
+          numarComanda: order.numarComanda,
+          nume: order.nume || '',
+        }),
+      }))
+
+      convertedOrders.sort((a, b) => {
+        if (a.eligibility.status === 'eligible' && b.eligibility.status !== 'eligible') return -1
+        if (a.eligibility.status !== 'eligible' && b.eligibility.status === 'eligible') return 1
+        return 0
+      })
+
+      const successPayload = {
+        success: true,
+        orders: convertedOrders,
+        message: convertedOrders.length === 1
+          ? 'Comanda a fost găsită cu succes! (mock mode)'
+          : `Am găsit ${convertedOrders.length} comenzi! (mock mode)`,
+      }
+      setCached(cacheKey, successPayload)
+      return NextResponse.json(successPayload)
+    }
 
     // Obține credențialele Shopify din configurație sau variabilele de mediu
     const config = await getConfig()
@@ -73,10 +231,7 @@ export async function POST(request: NextRequest) {
       if (!result.success || !result.orders || result.orders.length === 0) {
         // Nu există comenzi cu acest email
         console.log(`No orders found for email: ${email}`)
-        return NextResponse.json({
-          success: false,
-          message: 'Nu am găsit comenzi cu acest email. Verificați dacă email-ul este corect sau dacă ați făcut comenzi pe acest magazin.',
-        })
+        return failNotFound()
       }
 
       // Găsim toate comenzile asociate cu acel email
@@ -87,14 +242,10 @@ export async function POST(request: NextRequest) {
     // CAZUL 2: Căutare după număr comandă
     else if (orderNumber && orderNumber.trim().length > 0) {
       const result = await searchOrderByOrderNumber(orderNumber, shopifyDomain, shopifyAccessToken)
-      
+
       if (!result.success || !result.order) {
         // Comanda nu există
-        return NextResponse.json({
-          success: false,
-          message: 'Nu am găsit comanda cu numărul introdus.',
-          needsEmail: !email,
-        })
+        return failNotFound({ needsEmail: !email })
       }
 
       const foundOrder = result.order
@@ -124,19 +275,11 @@ export async function POST(request: NextRequest) {
             orders = [foundOrder]
           } else {
             // Nici numele, nici telefonul nu se potrivesc → invalid
-            return NextResponse.json({
-              success: false,
-              message: 'Comanda nu este asociată cu acest nume.',
-              needsEmail: !email,
-            })
+            return failNotFound({ needsEmail: !email })
           }
         } else {
           // Numele nu se potrivește și nu a introdus telefon → invalid
-          return NextResponse.json({
-            success: false,
-            message: 'Comanda nu este asociată cu acest nume.',
-            needsEmail: !email,
-          })
+          return failNotFound({ needsEmail: !email })
         }
       }
     }
@@ -146,11 +289,7 @@ export async function POST(request: NextRequest) {
       
       if (!result.success || !result.orders || result.orders.length === 0) {
         // Nu există comenzi cu acest telefon
-        return NextResponse.json({
-          success: false,
-          message: 'Nu am găsit comenzi cu acest număr de telefon.',
-          needsEmail: !email,
-        })
+        return failNotFound({ needsEmail: !email })
       }
 
       // Găsim toate comenzile cu acel telefon
@@ -185,10 +324,11 @@ export async function POST(request: NextRequest) {
       }
       
       // Dacă nu are comenzi după august 2025, dar are comenzi înainte → eroare
+      // (nu contorizăm ca fail — comanda există, dar nu e eligibilă online)
       if (matchedOrders.length === 0 && ordersBeforeCutoff.length > 0) {
         return NextResponse.json({
           success: false,
-          message: 'Nu aveți comenzi eligibile după august 2025. Vă rugăm să contactați suportul pentru comenzile mai vechi.',
+          message: 'Această comandă nu poate fi procesată online. Te rugăm să contactezi suportul.',
           needsEmail: !email,
         })
       }
@@ -199,11 +339,7 @@ export async function POST(request: NextRequest) {
         orders = matchedOrders
       } else {
         // Numele nu se potrivește cu nici o comandă → cerem email
-        return NextResponse.json({
-          success: false,
-          message: 'Pe acest număr de telefon nu este asociat acest nume.',
-          needsEmail: !email,
-        })
+        return failNotFound({ needsEmail: !email })
       }
     }
 
@@ -216,10 +352,7 @@ export async function POST(request: NextRequest) {
       if (!result.success || !result.orders || result.orders.length === 0) {
         // Nu există comenzi cu acest email
         console.log(`No orders found for email: ${email}`)
-        return NextResponse.json({
-          success: false,
-          message: 'Nu am găsit comenzi cu acest email. Verificați dacă email-ul este corect sau dacă ați făcut comenzi pe acest magazin.',
-        })
+        return failNotFound()
       }
 
       // Găsim toate comenzile asociate cu acel email
@@ -230,10 +363,24 @@ export async function POST(request: NextRequest) {
 
     // Dacă am găsit comenzi, le procesăm
     if (orders.length > 0) {
-      // Convertește comenzile în formatul aplicației și adaugă eligibilitatea
-      const convertedOrders = convertShopifyOrdersToAppFormat(orders).map(order => ({
+      // Convertește comenzile în formatul aplicației
+      const baseOrders = convertShopifyOrdersToAppFormat(orders)
+      // Îmbogățește cu imagini din Shopify (un singur apel batched)
+      try {
+        await enrichOrdersWithProductImages(baseOrders, shopifyDomain, shopifyAccessToken)
+      } catch (e) {
+        // Nu blocăm fluxul dacă imaginile eșuează
+        console.warn('Image enrichment failed:', e)
+      }
+      // Adaugă eligibilitatea și token de sesiune
+      const convertedOrders = baseOrders.map(order => ({
         ...order,
         eligibility: calculateEligibility(order.dataComanda),
+        sessionToken: createCustomerToken({
+          orderId: String(order.id),
+          numarComanda: order.numarComanda,
+          nume: order.nume || '',
+        }),
       }))
 
       // Sortează: comenzile eligibile primul, apoi celelalte
@@ -242,28 +389,37 @@ export async function POST(request: NextRequest) {
         if (a.eligibility.status !== 'eligible' && b.eligibility.status === 'eligible') return 1
         return 0
       })
-      
-      return NextResponse.json({
+
+      const successPayload = {
         success: true,
         orders: convertedOrders,
-        message: convertedOrders.length === 1 
-          ? 'Comanda a fost găsită cu succes!' 
+        message: convertedOrders.length === 1
+          ? 'Comanda a fost găsită cu succes!'
           : `Am găsit ${convertedOrders.length} comenzi!`,
+      }
+      setCached(cacheKey, successPayload)
+      await logAudit({
+        action: 'search_order_success',
+        ip,
+        details: { count: convertedOrders.length, ordersFound: convertedOrders.map(o => o.numarComanda) },
       })
+      return NextResponse.json(successPayload)
     }
 
     // Nu s-a găsit nicio comandă
-    return NextResponse.json({
-      success: false,
-      message: 'Comanda nu a fost găsită. Vă rugăm să verificați datele introduse.',
-      needsEmail: !email && !orderNumber && !phone,
+    await logAudit({
+      action: 'search_order_fail',
+      ip,
+      details: { reason: 'no_match', hadOrder: !!orderNumber, hadPhone: !!phone, hadEmail: !!email },
     })
+    return failNotFound({ needsEmail: !email && !orderNumber && !phone })
   } catch (error) {
     console.error('Error in search-order API:', error)
+    await logAudit({ action: 'search_order_fail', ip, details: { reason: 'exception' } })
     return NextResponse.json(
-      { 
-        success: false, 
-        message: 'A apărut o eroare la căutarea comenzii. Vă rugăm să încercați din nou.' 
+      {
+        success: false,
+        message: 'A apărut o eroare la căutarea comenzii. Vă rugăm să încercați din nou.'
       },
       { status: 500 }
     )

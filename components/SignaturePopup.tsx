@@ -7,23 +7,41 @@ import { OrderData, Product, RefundData } from './ReturnProcess'
 interface SignaturePopupProps {
   isOpen: boolean
   onClose: () => void
+  onBack?: () => void
   orderData: OrderData | null
   products: Product[]
   refundData: RefundData | null
+  sessionToken?: string | null
 }
 
 export default function SignaturePopup({
   isOpen,
   onClose,
+  onBack,
   orderData,
   products,
-  refundData
+  refundData,
+  sessionToken
 }: SignaturePopupProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [hasSignature, setHasSignature] = useState(false)
   const [pdfGenerated, setPdfGenerated] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [awbNumber, setAwbNumber] = useState<string | null>(null)
+  const [awbPdfUrl, setAwbPdfUrl] = useState<string | null>(null)
+
+  // Sume calculate pentru rezumat
+  const selectedItems = products.filter(p => p.selected && (p.cantitateReturnata || 0) > 0)
+  const subtotal = selectedItems.reduce((sum, p) => sum + p.pret * (p.cantitateReturnata || 0), 0)
+  const costTransport = refundData?.costTransport || 0
+  const totalRefund = Math.max(0, subtotal - costTransport)
+  const metodaTrimitere = refundData?.metodaTrimitere || 'manual'
+
+  const metodaLabel: Record<string, string> = {
+    curier: '🏠 Curier la adresă',
+    manual: '📮 Trimit eu cu un curier ales',
+  }
 
   useEffect(() => {
     if (isOpen && canvasRef.current) {
@@ -120,18 +138,34 @@ export default function SignaturePopup({
       
       // Pregătește datele pentru trimitere
       // orderData: doar nume (fără email și telefon)
-      // refundData: doar IBAN și numeTitular (fără metodaRambursare)
+      // refundData: include IBAN, numeTitular și datele de expediere alese în Pas 5
+      // orderContact: contact + adresă de livrare a comenzii (pentru pickup AWB SameDay).
+      //   Nu se persistă pe retur — folosit doar pentru a chema API SameDay.
+      const ship = orderData.shippingAddress
       const requestData = {
         orderData: {
           nume: orderData.nume,
           numarComanda: orderData.numarComanda,
         },
-        products,
+        orderContact: {
+          nume: ship?.nume || orderData.nume,
+          telefon: ship?.telefon || orderData.telefon,
+          email: orderData.email,
+          strada: ship?.strada || '',
+          oras: ship?.oras || '',
+          judet: ship?.judet || '',
+          codPostal: ship?.codPostal || '',
+          tara: ship?.tara || '',
+        },
+        products: products.filter(p => p.selected && (p.cantitateReturnata || 0) > 0),
         refundData: {
           iban: refundData.iban,
           numeTitular: refundData.numeTitular,
+          metodaTrimitere: refundData.metodaTrimitere,
+          costTransport: refundData.costTransport,
         },
         signature: signatureDataUrl,
+        sessionToken,
       }
       
       // Trimite datele la backend
@@ -160,7 +194,11 @@ export default function SignaturePopup({
       link.click()
       document.body.removeChild(link)
       window.URL.revokeObjectURL(pdfUrl)
-      
+
+      // Salvează AWB-ul pentru afișare (dacă există)
+      if (result.awbNumber) setAwbNumber(result.awbNumber)
+      if (result.awbPdfUrl) setAwbPdfUrl(result.awbPdfUrl)
+
       setPdfGenerated(true)
       setIsGenerating(false)
     } catch (error) {
@@ -257,30 +295,57 @@ export default function SignaturePopup({
           Vă rugăm să verificați datele returului încă o dată și să semnați mai jos. După semnare, veți putea descărca formularul de retur (PDF), pe care vă recomandăm să îl imprimați și să îl includeți în colet.
         </p>
 
-        {/* Agreement Text */}
+        {/* Rezumat retur */}
         <div style={{
           padding: '16px',
+          backgroundColor: '#f0fdfa',
+          border: '1px solid #99f6e4',
+          borderRadius: '10px',
+          marginBottom: '16px'
+        }}>
+          <p style={{ fontSize: '13px', fontWeight: 700, color: '#0f766e', margin: '0 0 10px 0' }}>
+            Rezumat retur
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#374151', padding: '3px 0' }}>
+            <span>Subtotal produse</span>
+            <span>{subtotal.toFixed(2)} RON</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#374151', padding: '3px 0' }}>
+            <span>Metodă trimitere</span>
+            <span style={{ fontWeight: 600 }}>{metodaLabel[metodaTrimitere]}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#374151', padding: '3px 0' }}>
+            <span>Cost transport</span>
+            <span style={{ color: costTransport > 0 ? '#c2410c' : '#047857', fontWeight: 600 }}>
+              {costTransport > 0 ? `−${costTransport.toFixed(2)} RON` : '0,00 RON'}
+            </span>
+          </div>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 8,
+            paddingTop: 8,
+            borderTop: '1px solid #99f6e4',
+            fontSize: '14px',
+            fontWeight: 700,
+            color: '#111827',
+          }}>
+            <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total rambursare</span>
+            <span style={{ fontSize: 18, color: '#26a69a', fontWeight: 800 }}>{totalRefund.toFixed(2)} RON</span>
+          </div>
+        </div>
+
+        {/* Agreement Text */}
+        <div style={{
+          padding: '14px 16px',
           backgroundColor: '#f9f9f9',
           borderRadius: '8px',
           marginBottom: '20px'
         }}>
-          <p style={{
-            fontSize: '14px',
-            fontWeight: 'bold',
-            marginBottom: '10px'
-          }}>
-            Prin semnarea acestui formular:
+          <p style={{ fontSize: '13px', color: '#374151', margin: 0, lineHeight: 1.6 }}>
+            Prin semnătură confirm că datele sunt corecte și că am citit instrucțiunile de expediere.
           </p>
-          <ul style={{
-            paddingLeft: '20px',
-            margin: 0,
-            fontSize: '14px',
-            lineHeight: '1.8'
-          }}>
-            <li>Confirm că datele introduse sunt corecte și complete;</li>
-            <li>Confirm că am citit și înțeles instrucțiunile de expediere;</li>
-            <li>Sunt de acord să trimit coletul cu ramburs 0 și să suport costul de expediere.</li>
-          </ul>
         </div>
 
         {/* Signature Field */}
@@ -336,30 +401,53 @@ export default function SignaturePopup({
           </button>
         </div>
 
-        {/* Generate PDF Button */}
+        {/* Action Buttons */}
         {!pdfGenerated && (
-          <button
-            onClick={generatePDF}
-            disabled={!hasSignature || isGenerating}
-            style={{
-              width: '100%',
-              padding: '16px',
-              borderRadius: '8px',
-              background: (hasSignature && !isGenerating)
-                ? 'linear-gradient(90deg, #2196F3 0%, #4CAF50 100%)'
-                : '#ccc',
-              color: '#fff',
-              border: 'none',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              cursor: (hasSignature && !isGenerating) ? 'pointer' : 'not-allowed',
-              opacity: (hasSignature && !isGenerating) ? 1 : 0.6,
-              transition: 'all 0.3s ease',
-              marginBottom: '12px'
-            }}
-          >
-            {isGenerating ? 'Se generează PDF-ul...' : 'Generează și descarcă formularul de retur (PDF)'}
-          </button>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+            {onBack && (
+              <button
+                onClick={onBack}
+                disabled={isGenerating}
+                style={{
+                  flex: '0 0 auto',
+                  padding: '14px 18px',
+                  borderRadius: '8px',
+                  background: 'transparent',
+                  color: '#6b7280',
+                  border: '1px solid #e5e7eb',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                  opacity: isGenerating ? 0.5 : 1,
+                  transition: 'all 0.2s ease',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                ← ÎNAPOI
+              </button>
+            )}
+            <button
+              onClick={generatePDF}
+              disabled={!hasSignature || isGenerating}
+              style={{
+                flex: 1,
+                padding: '16px',
+                borderRadius: '8px',
+                background: (hasSignature && !isGenerating)
+                  ? 'linear-gradient(90deg, #2196F3 0%, #4CAF50 100%)'
+                  : '#ccc',
+                color: '#fff',
+                border: 'none',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                cursor: (hasSignature && !isGenerating) ? 'pointer' : 'not-allowed',
+                opacity: (hasSignature && !isGenerating) ? 1 : 0.6,
+                transition: 'all 0.3s ease',
+              }}
+            >
+              {isGenerating ? 'Se generează PDF-ul...' : 'Generează și descarcă formularul de retur (PDF)'}
+            </button>
+          </div>
         )}
 
         {/* Confirmation Message */}
@@ -377,8 +465,50 @@ export default function SignaturePopup({
               color: '#2e7d32',
               marginBottom: '12px'
             }}>
-              ✅ Formularul a fost generat.
+              ✅ Formularul a fost generat și descărcat.
             </p>
+
+            {awbNumber && (
+              <div style={{
+                background: '#fff',
+                border: '1px solid #99f6e4',
+                borderRadius: 8,
+                padding: '12px 14px',
+                marginBottom: 12,
+                textAlign: 'left'
+              }}>
+                <p style={{ fontSize: 12, color: '#0f766e', margin: '0 0 4px 0', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  AWB SameDay
+                </p>
+                <p style={{ fontSize: 16, color: '#111827', margin: 0, fontFamily: 'ui-monospace, monospace', fontWeight: 700 }}>
+                  {awbNumber}
+                </p>
+                {awbPdfUrl && (
+                  <a
+                    href={awbPdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-block',
+                      marginTop: 10,
+                      padding: '8px 14px',
+                      background: '#26a69a',
+                      color: '#fff',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Descarcă eticheta SameDay (PDF)
+                  </a>
+                )}
+                <p style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 0 0', lineHeight: 1.5 }}>
+                  Curierul SameDay va veni la adresa ta. Asigură-te că coletul e ambalat și gata de ridicare.
+                </p>
+              </div>
+            )}
+
             <button
               onClick={onClose}
               style={{
