@@ -21,6 +21,8 @@ export type AuditAction =
   | 'return_cancel_denied'
   | 'admin_login_success'
   | 'admin_login_fail'
+  | 'register_bootstrap'
+  | 'register_denied'
 
 export interface AuditEntry {
   timestamp: string

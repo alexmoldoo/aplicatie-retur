@@ -168,6 +168,21 @@ export function saveUsers(users: User[]): void {
 }
 
 /**
+ * Numără utilizatorii existenți. Folosit pentru bootstrap: înregistrarea
+ * publică e permisă doar când DB-ul e gol (primul admin).
+ */
+export async function countUsers(): Promise<number> {
+  if (supabase) {
+    const { count, error } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+    if (error) throw new Error('Eroare la numărarea utilizatorilor: ' + error.message)
+    return count ?? 0
+  }
+  return getUsers().length
+}
+
+/**
  * Găsește un utilizator după email
  */
 export async function findUserByEmail(email: string): Promise<User | null> {
