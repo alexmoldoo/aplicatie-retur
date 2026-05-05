@@ -100,7 +100,7 @@ export async function searchOrderByOrderNumber(
 
     for (const pattern of searchPatterns) {
       const response = await fetch(
-        `https://${shopifyDomain}/admin/api/2024-01/orders.json?name=${pattern}&status=any`,
+        `https://${shopifyDomain}/admin/api/2026-04/orders.json?name=${pattern}&status=any`,
         {
           headers: {
             'X-Shopify-Access-Token': accessToken,
@@ -224,7 +224,7 @@ async function searchCustomerByPhone(
     for (const phoneVariant of phoneVariants) {
       try {
         const response = await fetch(
-          `https://${shopifyDomain}/admin/api/2024-01/customers.json?phone=${encodeURIComponent(phoneVariant)}&limit=250`,
+          `https://${shopifyDomain}/admin/api/2026-04/customers.json?phone=${encodeURIComponent(phoneVariant)}&limit=250`,
           {
             headers: {
               'X-Shopify-Access-Token': accessToken,
@@ -300,7 +300,7 @@ export async function searchOrdersByPhone(
       // Caută comenzile după customer_id
       try {
         const response = await fetch(
-          `https://${shopifyDomain}/admin/api/2024-01/orders.json?customer_id=${customer.id}&status=any&limit=250`,
+          `https://${shopifyDomain}/admin/api/2026-04/orders.json?customer_id=${customer.id}&status=any&limit=250`,
           {
             headers: {
               'X-Shopify-Access-Token': accessToken,
@@ -330,7 +330,7 @@ export async function searchOrdersByPhone(
       if (customer.email) {
         try {
           const response = await fetch(
-            `https://${shopifyDomain}/admin/api/2024-01/orders.json?email=${encodeURIComponent(customer.email)}&status=any&limit=250`,
+            `https://${shopifyDomain}/admin/api/2026-04/orders.json?email=${encodeURIComponent(customer.email)}&status=any&limit=250`,
             {
               headers: {
                 'X-Shopify-Access-Token': accessToken,
@@ -441,7 +441,7 @@ export async function searchOrdersByEmail(
     console.log(`Searching orders for email: ${cleanEmail} on domain: ${shopifyDomain}`)
     
     const response = await fetch(
-      `https://${shopifyDomain}/admin/api/2024-01/orders.json?email=${encodeURIComponent(cleanEmail)}&status=any&limit=250`,
+      `https://${shopifyDomain}/admin/api/2026-04/orders.json?email=${encodeURIComponent(cleanEmail)}&status=any&limit=250`,
       {
         headers: {
           'X-Shopify-Access-Token': accessToken,
@@ -697,7 +697,7 @@ export async function fetchProductImages(
 
   try {
     const idsParam = toFetch.join(',')
-    const url = `https://${shopifyDomain}/admin/api/2024-01/products.json?ids=${idsParam}&fields=id,image,images&limit=250`
+    const url = `https://${shopifyDomain}/admin/api/2026-04/products.json?ids=${idsParam}&fields=id,image,images&limit=250`
     const response = await fetch(url, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
