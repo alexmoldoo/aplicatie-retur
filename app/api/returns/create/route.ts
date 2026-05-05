@@ -327,18 +327,37 @@ export async function POST(request: NextRequest) {
       awbNumber,
     }
 
-    // Generează PDF
-    const pdfBuffer = await generateReturnPDF(tempReturn, qrCodeDataUrl)
-
-    // Salvează PDF-ul
-    const returnsDir = path.join(process.cwd(), 'data', 'retururi')
-    if (!fs.existsSync(returnsDir)) {
-      fs.mkdirSync(returnsDir, { recursive: true })
+    // Generează PDF (în memorie). Validăm că funcționează — dacă pică, oprim
+    // tot fluxul ca să nu salvăm un retur fără PDF descărcabil.
+    try {
+      await generateReturnPDF(tempReturn, qrCodeDataUrl)
+    } catch (err) {
+      console.error('PDF generation failed:', err)
+      return NextResponse.json(
+        { success: false, message: 'Eroare la generarea PDF-ului. Încearcă din nou.' },
+        { status: 500 }
+      )
     }
 
-    const pdfFileName = `${idRetur}.pdf`
-    const pdfPath = path.join(returnsDir, pdfFileName)
-    fs.writeFileSync(pdfPath, pdfBuffer)
+    // Pe Vercel filesystem-ul e read-only — sărim peste scrierea pe disc.
+    // PDF-ul e regenerat on-demand la GET /api/returns/[id]/pdf din datele din DB.
+    const IS_VERCEL = !!process.env.VERCEL
+    let pdfPath = ''
+    if (!IS_VERCEL) {
+      try {
+        const returnsDir = path.join(process.cwd(), 'data', 'retururi')
+        if (!fs.existsSync(returnsDir)) {
+          fs.mkdirSync(returnsDir, { recursive: true })
+        }
+        const pdfFileName = `${idRetur}.pdf`
+        pdfPath = path.join(returnsDir, pdfFileName)
+        const buf = await generateReturnPDF(tempReturn, qrCodeDataUrl)
+        fs.writeFileSync(pdfPath, buf)
+      } catch (err) {
+        console.warn('Local PDF cache write skipped:', err)
+        pdfPath = ''
+      }
+    }
 
     // Creează returul în baza de date
     const newReturn = await createReturn(

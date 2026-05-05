@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { findReturnById } from '@/lib/db'
 import { getSessionFromCookies } from '@/lib/auth'
 import { verifyCustomerToken } from '@/lib/customer-session'
+import { generateReturnPDF } from '@/lib/pdf-generator'
 import fs from 'fs'
 
 export const dynamic = 'force-dynamic'
@@ -49,16 +50,27 @@ export async function GET(
       )
     }
 
-    if (!returnData.pdfPath || !fs.existsSync(returnData.pdfPath)) {
-      return NextResponse.json(
-        { success: false, message: 'PDF not found' },
-        { status: 404 }
-      )
+    // Pe Vercel filesystem-ul e read-only, deci nu putem citi PDF de pe disc.
+    // Soluție universală: regenerăm PDF-ul on-demand din datele din DB.
+    // (Avantaj bonus: PDF-ul reflectă întotdeauna ultimele date — ex. AWB
+    // adăugat post-creare.)
+    let pdfBuffer: Buffer
+
+    if (returnData.pdfPath && fs.existsSync(returnData.pdfPath)) {
+      pdfBuffer = fs.readFileSync(returnData.pdfPath)
+    } else {
+      try {
+        pdfBuffer = await generateReturnPDF(returnData, returnData.qrCodeData || '')
+      } catch (err) {
+        console.error('Failed to regenerate PDF on-demand:', err)
+        return NextResponse.json(
+          { success: false, message: 'Eroare la generarea PDF-ului' },
+          { status: 500 }
+        )
+      }
     }
 
-    const pdfBuffer = fs.readFileSync(returnData.pdfPath)
-
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(pdfBuffer as any, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${returnData.idRetur}.pdf"`,
