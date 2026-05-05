@@ -4,7 +4,8 @@ import {
   searchOrdersByPhone,
   searchOrdersByEmail,
   convertShopifyOrdersToAppFormat,
-  enrichOrdersWithProductImages
+  enrichOrdersWithProductImages,
+  getShopifyAccessToken,
 } from '@/lib/shopify'
 import { calculateEligibility } from '@/lib/eligibility'
 import { getConfig, findReturnByOrderNumber } from '@/lib/db'
@@ -174,16 +175,31 @@ export async function POST(request: NextRequest) {
 
     // Obține credențialele Shopify din configurație sau variabilele de mediu
     const config = await getConfig()
-    
-    const shopifyDomain = config.shopify.domain || process.env.SHOPIFY_DOMAIN
-    const shopifyAccessToken = config.shopify.accessToken || process.env.SHOPIFY_ACCESS_TOKEN
 
-    if (!shopifyDomain || !shopifyAccessToken) {
+    const shopifyDomain = config.shopify.domain || process.env.SHOPIFY_DOMAIN
+    const legacyToken = config.shopify.accessToken || process.env.SHOPIFY_ACCESS_TOKEN
+    const clientId = process.env.SHOPIFY_CLIENT_ID
+    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+
+    if (!shopifyDomain) {
       return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Configurația Shopify nu este completă. Vă rugăm să contactați administratorul.' 
-        },
+        { success: false, message: 'Configurația Shopify nu este completă (lipsește domeniul).' },
+        { status: 500 }
+      )
+    }
+
+    let shopifyAccessToken: string
+    try {
+      shopifyAccessToken = await getShopifyAccessToken({
+        domain: shopifyDomain,
+        legacyToken,
+        clientId,
+        clientSecret,
+      })
+    } catch (err: any) {
+      console.error('[search-order] failed to obtain Shopify access token:', err?.message)
+      return NextResponse.json(
+        { success: false, message: 'Configurația Shopify nu este completă. Vă rugăm să contactați administratorul.' },
         { status: 500 }
       )
     }

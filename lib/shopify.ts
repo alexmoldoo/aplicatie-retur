@@ -68,6 +68,69 @@ export interface SearchOrderResult {
 }
 
 /**
+ * Cache pentru access token-ul obținut prin client_credentials_grant.
+ * Token-ul Shopify e valid 24h; refresh la jumătate ca să avem siguranță.
+ */
+let tokenCache: { token: string; expiresAt: number; domain: string } | null = null
+
+/**
+ * Obține un Admin API access token pentru Shopify.
+ *
+ * Suportă 2 moduri (în ordine de prioritate):
+ *   1. LEGACY: dacă există un token care începe cu `shpat_`, îl folosește direct
+ *      (custom apps clasice, deprecat din 2026-01-01 dar tokenele existente merg).
+ *   2. NOU: dacă are `clientId` + `clientSecret`, face client_credentials_grant
+ *      la `/admin/oauth/access_token` și cachează rezultatul (~24h).
+ */
+export async function getShopifyAccessToken(opts: {
+  domain: string
+  legacyToken?: string | null
+  clientId?: string | null
+  clientSecret?: string | null
+}): Promise<string> {
+  const { domain, legacyToken, clientId, clientSecret } = opts
+
+  if (legacyToken && legacyToken.startsWith('shpat_')) {
+    return legacyToken
+  }
+
+  if (!clientId || !clientSecret) {
+    throw new Error('Shopify nu e configurat: lipsesc CLIENT_ID/CLIENT_SECRET (sau un token shpat_ legacy).')
+  }
+
+  if (tokenCache && tokenCache.domain === domain && tokenCache.expiresAt > Date.now() + 60_000) {
+    return tokenCache.token
+  }
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: 'client_credentials',
+  })
+
+  const res = await fetch(`https://${domain}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    console.error(`[shopify] client_credentials_grant failed status=${res.status} body=${errText.slice(0, 300)}`)
+    throw new Error(`Shopify OAuth failed: ${res.status}`)
+  }
+
+  const data = await res.json() as { access_token: string; expires_in: number; scope: string }
+  tokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + (data.expires_in * 1000),
+    domain,
+  }
+  console.log(`[shopify] obtained new access token via client_credentials_grant scope=${data.scope} expiresIn=${data.expires_in}s`)
+  return data.access_token
+}
+
+/**
  * Caută o comandă în Shopify după număr comandă
  * Acceptă formate: #12345, MX12345, 12345, #MX12345
  */
