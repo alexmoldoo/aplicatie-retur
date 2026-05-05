@@ -166,6 +166,11 @@ export function isLegacyPasswordHash(hash: string): boolean {
  */
 export function getUsers(): User[] {
   if (!supabase) {
+    if (IS_VERCEL) {
+      throw new Error(
+        'Supabase nu este configurat în Vercel. Setează SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY (Production scope) și redeploy.'
+      )
+    }
     try {
       const data = fs.readFileSync(USERS_FILE, 'utf-8')
       return JSON.parse(data)
@@ -181,6 +186,11 @@ export function getUsers(): User[] {
  */
 export function saveUsers(users: User[]): void {
   if (!supabase) {
+    if (IS_VERCEL) {
+      throw new Error(
+        'Supabase nu este configurat în Vercel. Setează SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY (Production scope) și redeploy.'
+      )
+    }
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2))
   }
 }
