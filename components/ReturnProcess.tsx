@@ -115,8 +115,15 @@ export default function ReturnProcess() {
   // Callback când se găsesc comenzi în step 1 - trece automat la step 2
   const handleOrdersFound = (orders: any[]) => {
     setFoundOrders(orders)
-    // F3 — Auto-skip: dacă există DOAR o comandă și e eligibilă, sărim direct la pas 3
-    if (orders.length === 1 && orders[0]?.eligibility?.status === 'eligible') {
+    // F3 — Auto-skip: dacă există DOAR o comandă, e eligibilă ȘI nu are deja un retur,
+    // sărim direct la pas 3. Dacă are deja un retur (chiar dacă e singura comandă),
+    // o forțăm să treacă pe la pas 2 ca să vadă starea returului existent și să-l
+    // poată anula înainte de a iniția unul nou.
+    if (
+      orders.length === 1 &&
+      orders[0]?.eligibility?.status === 'eligible' &&
+      !orders[0]?.existingReturn
+    ) {
       handleSelectOrderFromList(orders[0])
       return
     }
