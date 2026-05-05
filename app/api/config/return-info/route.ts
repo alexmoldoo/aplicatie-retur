@@ -1,32 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import fs from 'fs'
-import path from 'path'
+import { createClient } from '@supabase/supabase-js'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const CONFIG_FILE = path.join(process.cwd(), 'data', 'config.json')
+const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+const supabase = supabaseUrl && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null
 
-interface ReturnInfo {
-  adresaRetur: {
-    companie: string
-    strada: string
-    oras: string
-    judet: string
-    codPostal: string
-    tara: string
-    telefon: string
-  }
-  transportCosts: {
-    curier: number
-  }
-  shopTitle: string
-  logo?: string | null
+interface AdresaRetur {
+  companie: string
+  strada: string
+  oras: string
+  judet: string
+  codPostal: string
+  tara: string
+  telefon: string
 }
 
-const FALLBACK: ReturnInfo = {
+interface TransportCosts {
+  curier: number
+}
+
+interface ReturnInfoBlob {
+  adresaRetur?: AdresaRetur
+  transportCosts?: TransportCosts
+  branding?: { logo?: string | null }
+}
+
+const FALLBACK = {
   adresaRetur: {
     companie: 'Maxari',
     strada: 'Șoseaua Sibiului, nr. 11',
@@ -35,43 +41,44 @@ const FALLBACK: ReturnInfo = {
     codPostal: '551129',
     tara: 'România',
     telefon: '-',
-  },
-  transportCosts: { curier: 19.99 },
+  } as AdresaRetur,
+  transportCosts: { curier: 19.99 } as TransportCosts,
   shopTitle: 'MAXARI.RO',
+}
+
+async function loadConfigRow() {
+  if (!supabase) return null
+  const { data } = await supabase
+    .from('app_config')
+    .select('id, shop_title, return_info')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single()
+  return data
 }
 
 /**
  * GET — endpoint public pentru clientul de retur.
- * Returnează adresa de retur a magazinului, costurile de transport și titlul magazinului.
  */
 export async function GET() {
   try {
-    const raw = fs.readFileSync(CONFIG_FILE, 'utf-8')
-    const cfg = JSON.parse(raw) as Partial<{
-      adresaRetur: ReturnInfo['adresaRetur']
-      transportCosts: ReturnInfo['transportCosts']
-      shopify: { shopTitle?: string }
-      branding: { logo?: string | null }
-    }>
-
+    const row = await loadConfigRow()
+    const blob: ReturnInfoBlob = row?.return_info || {}
     return NextResponse.json({
       success: true,
-      adresaRetur: cfg.adresaRetur || FALLBACK.adresaRetur,
-      transportCosts: cfg.transportCosts || FALLBACK.transportCosts,
-      shopTitle: cfg.shopify?.shopTitle || FALLBACK.shopTitle,
-      logo: cfg.branding?.logo || null,
+      adresaRetur: blob.adresaRetur || FALLBACK.adresaRetur,
+      transportCosts: blob.transportCosts || FALLBACK.transportCosts,
+      shopTitle: row?.shop_title || FALLBACK.shopTitle,
+      logo: blob.branding?.logo || null,
     })
   } catch (error) {
     console.error('Error reading return info config:', error)
-    return NextResponse.json({
-      success: true,
-      ...FALLBACK,
-    })
+    return NextResponse.json({ success: true, ...FALLBACK, logo: null })
   }
 }
 
 /**
- * POST — actualizează adresaRetur și/sau transportCosts. Necesită admin.
+ * POST — actualizează adresaRetur, transportCosts și/sau logo. Admin only.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -81,6 +88,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'Neautorizat' }, { status: 401 })
     }
 
+    if (!supabase) {
+      return NextResponse.json(
+        { success: false, message: 'Supabase nu este configurat în Vercel.' },
+        { status: 500 }
+      )
+    }
+
     const body = await request.json()
     const { adresaRetur, transportCosts, logo } = body || {}
 
@@ -88,12 +102,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'Nimic de actualizat' }, { status: 400 })
     }
 
-    let cfg: any = {}
-    try {
-      cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'))
-    } catch {
-      cfg = {}
-    }
+    const row = await loadConfigRow()
+    const blob: ReturnInfoBlob = (row?.return_info as ReturnInfoBlob) || {}
 
     if (adresaRetur) {
       const required = ['companie', 'strada', 'oras', 'judet', 'codPostal', 'tara', 'telefon'] as const
@@ -102,7 +112,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: false, message: `Câmp lipsă: ${k}` }, { status: 400 })
         }
       }
-      cfg.adresaRetur = {
+      blob.adresaRetur = {
         companie: adresaRetur.companie.trim() || 'Maxari',
         strada: adresaRetur.strada.trim(),
         oras: adresaRetur.oras.trim(),
@@ -116,32 +126,42 @@ export async function POST(request: NextRequest) {
     if (transportCosts) {
       const c = Number(transportCosts.curier)
       if (Number.isFinite(c) && c >= 0) {
-        cfg.transportCosts = { ...(cfg.transportCosts || {}), curier: c }
+        blob.transportCosts = { ...(blob.transportCosts || { curier: 19.99 }), curier: c }
       }
     }
 
     if (logo !== undefined) {
-      cfg.branding = cfg.branding || {}
+      blob.branding = blob.branding || {}
       if (logo === null || logo === '') {
-        cfg.branding.logo = null
+        blob.branding.logo = null
       } else if (typeof logo === 'string' && /^data:image\/(png|jpe?g|webp);base64,/.test(logo)) {
-        // limita ~1MB pe data URL ca să nu se umfle config.json
         if (logo.length > 1_400_000) {
           return NextResponse.json({ success: false, message: 'Logo-ul depaseste 1 MB. Foloseste o imagine mai mica.' }, { status: 400 })
         }
-        cfg.branding.logo = logo
+        blob.branding.logo = logo
       } else {
         return NextResponse.json({ success: false, message: 'Format logo invalid (acceptate: PNG, JPG, WEBP).' }, { status: 400 })
       }
     }
 
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2))
+    if (row?.id) {
+      const { error } = await supabase
+        .from('app_config')
+        .update({ return_info: blob, updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+      if (error) throw new Error(error.message)
+    } else {
+      const { error } = await supabase
+        .from('app_config')
+        .insert({ return_info: blob })
+      if (error) throw new Error(error.message)
+    }
 
     return NextResponse.json({
       success: true,
-      adresaRetur: cfg.adresaRetur,
-      transportCosts: cfg.transportCosts,
-      logo: cfg.branding?.logo || null,
+      adresaRetur: blob.adresaRetur,
+      transportCosts: blob.transportCosts,
+      logo: blob.branding?.logo || null,
     })
   } catch (error) {
     console.error('Error updating return info config:', error)

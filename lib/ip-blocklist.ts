@@ -56,9 +56,15 @@ function loadBlocklist(): BlocklistData {
   }
 }
 
+const IS_VERCEL = !!process.env.VERCEL
+
 function saveBlocklist(data: BlocklistData): void {
   cache = data
   cacheLoadedAt = Date.now()
+  // Pe Vercel filesystem-ul e read-only — păstrăm doar in-memory.
+  // (Cache-ul moare la cold-start, dar e acceptabil pentru un blocklist
+  // de protecție brute-force; rate-limit-ul rămâne activ.)
+  if (IS_VERCEL) return
   try {
     const dir = path.dirname(BLOCKLIST_FILE)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
