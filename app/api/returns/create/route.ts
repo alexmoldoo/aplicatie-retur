@@ -8,6 +8,7 @@ import { getClientIp, makeRateLimiter, isAllowedOrigin, formatWaitTime } from '@
 import { isBlocked, recordFail } from '@/lib/ip-blocklist'
 import { createReturnAWB } from '@/lib/sameday'
 import { validateRomanianIBAN } from '@/lib/iban-validator'
+import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
 
@@ -15,7 +16,32 @@ const MAX_PRODUCTS = 50
 const MAX_QTY_PER_PRODUCT = 50
 const MAX_PRICE_PER_PRODUCT = 50000
 const MAX_SIGNATURE_BYTES = 250_000 // ~180KB PNG base64 reasonable
-const ALLOWED_TRANSPORT_COSTS = new Set([0, 15.99])
+const DEFAULT_CURIER_COST = 19.99
+
+const _sbUrl = (process.env.SUPABASE_URL || '').trim()
+const _sbKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+const _supabase = _sbUrl && _sbKey ? createClient(_sbUrl, _sbKey) : null
+
+/**
+ * Citește costul curier configurat de admin în /admin/Setări (stocat în
+ * app_config.return_info.transportCosts.curier). Folosit ca singura sursă
+ * de adevăr server-side pentru validarea costului trimis de client.
+ */
+async function getCurierCost(): Promise<number> {
+  if (!_supabase) return DEFAULT_CURIER_COST
+  try {
+    const { data } = await _supabase
+      .from('app_config')
+      .select('return_info')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+    const c = Number((data?.return_info as any)?.transportCosts?.curier)
+    return Number.isFinite(c) && c >= 0 ? c : DEFAULT_CURIER_COST
+  } catch {
+    return DEFAULT_CURIER_COST
+  }
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -187,9 +213,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Forțează costul corect server-side (ignorăm valoarea trimisă dacă nu e în whitelist)
-    const costTransport = metodaTrimitere === 'curier' ? 15.99 : 0
-    if (!ALLOWED_TRANSPORT_COSTS.has(costTransportRaw) || costTransportRaw !== costTransport) {
+    // Forțează costul corect server-side: îl citim direct din configul admin,
+    // nu îl primim de la client. Tolerăm o mică diferență de rotunjire.
+    const configuredCurierCost = await getCurierCost()
+    const costTransport = metodaTrimitere === 'curier' ? configuredCurierCost : 0
+    if (Math.abs(costTransportRaw - costTransport) > 0.01) {
       await logAudit({
         action: 'create_return_fail',
         ip,
