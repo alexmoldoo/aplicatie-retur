@@ -4,7 +4,6 @@ import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { OrderData } from './ReturnProcess'
 import VerificationPopup from './VerificationPopup'
-import OrderSelection from './OrderSelection'
 import { validateName, isValidOrderNumberFormat, normalizeOrderNumber } from '@/lib/order-validator'
 import { isValidRomanianPhone, formatPhoneAsTyped } from '@/lib/phone-validator'
 
@@ -118,15 +117,15 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
       const result = await response.json()
 
       if (result.success && result.orders && result.orders.length > 0) {
-        // Comenzi găsite - trimite comenzile la componenta părinte pentru a trece la step 2
-        setLoading(false)
-        setFoundOrders(result.orders)
-        setSearchStep('found')
-        
-        // Trimite comenzile găsite la componenta părinte pentru a trece la step 2
+        // Comenzi găsite — pasăm direct la parent (care decide step 2 vs auto-skip 3).
+        // NU setăm searchStep('found') aici: ar randa OrderSelection inline înainte ca
+        // parent-ul să schimbe componenta, ceea ce produce un flash galben (badge
+        // INITIAT/IN_ASTEPTARE_COLET) la tranziție.
         if (onOrderSelected) {
           onOrderSelected(result.orders)
         }
+        // Lăsăm `loading=true` ca să rămână butonul dezactivat până când parent-ul
+        // schimbă componenta — fără flash de UI intermediar.
       } else {
         // Comanda nu a fost găsită — mesaj generic pentru toate cazurile
         setLoading(false)
@@ -177,33 +176,8 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
     setFoundOrders([])
   }
 
-  const handleOrderSelect = (order: any) => {
-    // Pregătește datele pentru următorul pas
-    const orderData: OrderData = {
-      nume: order.nume,
-      numarComanda: order.numarComanda,
-      telefon: order.telefon,
-      email: order.email,
-      orderId: order.id,
-      products: order.products,
-    }
-    
-    onSubmit(orderData)
-  }
-
-  // Dacă s-au găsit comenzi, afișează selecția
-  // OrderSelection va gestiona trecerea la step 2 prin onOrderSelected
-  if (searchStep === 'found' && foundOrders.length > 0) {
-    return (
-      <>
-        <OrderSelection
-          orders={foundOrders}
-          onSelectOrder={handleOrderSelect}
-          onBack={handleResetAll}
-        />
-      </>
-    )
-  }
+  // (Eliminat: branch-ul care randa OrderSelection inline cauza un flash de UI
+  // între ultimul submit și schimbarea de step controlată de parent.)
 
   return (
     <>
