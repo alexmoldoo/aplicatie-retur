@@ -94,14 +94,33 @@ export default function Contact() {
         </div>
       ) : (
         <>
-          <div style={{ marginBottom: '40px' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>
+          <div style={{ marginBottom: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '14px' }}>
               Informații de contact
             </h2>
-            <div style={{ lineHeight: '2' }}>
-              <p><strong>Email:</strong> contact@maxari.ro</p>
-              <p><strong>Telefon:</strong> +40 123 456 789</p>
-              <p><strong>Program:</strong> Luni - Vineri: 9:00 - 18:00</p>
+            <div style={{ fontSize: '14px', color: '#374151', lineHeight: '1.9' }}>
+              <p style={{ margin: 0 }}>
+                <strong>Email:</strong>{' '}
+                <a
+                  href="mailto:info@maxari.ro"
+                  style={{ color: '#26a69a', textDecoration: 'none', fontWeight: 600 }}
+                >
+                  info@maxari.ro
+                </a>
+              </p>
+              <p style={{ margin: 0 }}>
+                <strong>Program:</strong> Luni – Vineri, 12:00 – 16:00
+              </p>
+              <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#9ca3af' }}>
+                <a
+                  href="https://wa.me/40770404859"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#9ca3af', textDecoration: 'underline' }}
+                >
+                  WhatsApp
+                </a>
+              </p>
             </div>
           </div>
 

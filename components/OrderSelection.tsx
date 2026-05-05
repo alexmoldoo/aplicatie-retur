@@ -4,6 +4,17 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { getLedColor } from '@/lib/eligibility'
 
+type ReturnStatus = 'INITIAT' | 'IN_ASTEPTARE_COLET' | 'COLET_PRIMIT' | 'PROCESAT' | 'FINALIZAT' | 'ANULAT'
+
+interface ExistingReturnInfo {
+  idRetur: string
+  status: ReturnStatus
+  awbNumber: string | null
+  createdAt: string
+  totalRefund: number
+  metodaTrimitere: 'curier' | 'manual' | null
+}
+
 interface Order {
   id: string
   nume: string
@@ -27,6 +38,41 @@ interface Order {
     daysRemaining: number
     daysSinceOrder: number
     message?: string
+  }
+  sessionToken?: string
+  existingReturn?: ExistingReturnInfo | null
+}
+
+const RETURN_STATUS_LABEL: Record<ReturnStatus, string> = {
+  INITIAT: 'Inițiat',
+  IN_ASTEPTARE_COLET: 'În așteptarea coletului',
+  COLET_PRIMIT: 'Colet primit',
+  PROCESAT: 'În procesare',
+  FINALIZAT: 'Finalizat (rambursat)',
+  ANULAT: 'Anulat',
+}
+
+function isCancellableStatus(status: ReturnStatus): boolean {
+  return status === 'INITIAT' || status === 'IN_ASTEPTARE_COLET'
+}
+
+/** Self-cancel permis doar fără AWB (metoda „manual"). Cu AWB → cerere admin prin email. */
+function canSelfCancel(er: ExistingReturnInfo): boolean {
+  return isCancellableStatus(er.status) && !er.awbNumber
+}
+
+function returnStatusColor(status: ReturnStatus): { bg: string; fg: string; border: string } {
+  switch (status) {
+    case 'INITIAT':
+    case 'IN_ASTEPTARE_COLET':
+      return { bg: '#fef3c7', fg: '#92400e', border: '#fcd34d' }
+    case 'COLET_PRIMIT':
+    case 'PROCESAT':
+      return { bg: '#dbeafe', fg: '#1e40af', border: '#93c5fd' }
+    case 'FINALIZAT':
+      return { bg: '#dcfce7', fg: '#166534', border: '#86efac' }
+    case 'ANULAT':
+      return { bg: '#f3f4f6', fg: '#6b7280', border: '#d1d5db' }
   }
 }
 
@@ -73,19 +119,80 @@ function getEligibilityText(order: Order): string {
 
 export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderSelectionProps) {
   const router = useRouter()
-  const defaultOrder = orders.find(o => o.eligibility.status === 'eligible') || orders[0]
+  // Set local de retururi anulate în această sesiune — folosit ca să debloceze imediat
+  // comanda în UI fără să așteptăm cache-ul de 60s al search-order.
+  const [cancelledReturnIds, setCancelledReturnIds] = useState<Set<string>>(new Set())
+
+  // Aplică override-ul local pentru comenzile cu retur anulat în această sesiune
+  const ordersView = orders.map(o => {
+    if (o.existingReturn && cancelledReturnIds.has(o.existingReturn.idRetur)) {
+      return { ...o, existingReturn: null }
+    }
+    return o
+  })
+
+  // Comenzile fără retur activ sunt selectabile pentru retur nou
+  const selectableOrders = ordersView.filter(o => !o.existingReturn)
+  const defaultOrder =
+    selectableOrders.find(o => o.eligibility.status === 'eligible') || selectableOrders[0] || null
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(
     defaultOrder ? defaultOrder.id : null
   )
   const [showExpiredConfirm, setShowExpiredConfirm] = useState(false)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
 
   useEffect(() => {
     if (defaultOrder && selectedOrderId === null) {
       setSelectedOrderId(defaultOrder.id)
     }
-  }, [orders.length])
+  }, [ordersView.length, defaultOrder?.id])
 
-  const selectedOrder = orders.find(o => o.id === selectedOrderId)
+  const selectedOrder = ordersView.find(o => o.id === selectedOrderId)
+
+  const handleDownloadReturnPdf = (idRetur: string, sessionToken?: string) => {
+    const qs = sessionToken ? `?token=${encodeURIComponent(sessionToken)}` : ''
+    window.open(`/api/returns/${encodeURIComponent(idRetur)}/pdf${qs}`, '_blank', 'noopener')
+  }
+
+  const handleCancelReturn = async (order: Order) => {
+    if (!order.existingReturn) return
+    if (!order.sessionToken) {
+      setCancelError('Sesiune expirată. Reîncarcă pagina și caută din nou comanda.')
+      return
+    }
+    const confirmed = window.confirm(
+      `Sigur vrei să anulezi returul ${order.existingReturn.idRetur}?\n\nVei putea iniția un nou retur după anulare. Dacă ai trimis deja coletul, contactează-ne pe info@maxari.ro.`
+    )
+    if (!confirmed) return
+
+    setCancellingId(order.existingReturn.idRetur)
+    setCancelError(null)
+    try {
+      const res = await fetch(`/api/returns/${encodeURIComponent(order.existingReturn.idRetur)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken: order.sessionToken }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        setCancelError(data?.message || 'Anularea a eșuat. Încearcă din nou.')
+        setCancellingId(null)
+        return
+      }
+      // Marchează returul ca anulat local — comanda devine imediat selectabilă pentru retur nou
+      setCancelledReturnIds(prev => {
+        const next = new Set(prev)
+        next.add(order.existingReturn!.idRetur)
+        return next
+      })
+      setCancellingId(null)
+    } catch (e) {
+      console.error('cancel return failed', e)
+      setCancelError('Eroare de rețea la anularea returului.')
+      setCancellingId(null)
+    }
+  }
 
   const handleContinue = () => {
     if (!selectedOrder) return
@@ -113,22 +220,35 @@ export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderS
     return 'Expirat'
   }
 
+  const allHaveReturns = ordersView.length > 0 && selectableOrders.length === 0
+  const someHaveReturns = !allHaveReturns && ordersView.some(o => o.existingReturn)
+
   return (
     <div className="step-container os-sel-form">
       <div className="os-sel-header">
         <div className="os-sel-header-icon" aria-hidden="true">📋</div>
         <h2 className="os-sel-title">
-          {orders.length === 1 ? 'Comanda găsită' : `Am găsit ${orders.length} comenzi`}
+          {allHaveReturns
+            ? orders.length === 1
+              ? 'Ai deja un retur pe această comandă'
+              : 'Ai retururi active pe aceste comenzi'
+            : orders.length === 1
+            ? 'Comanda găsită'
+            : `Am găsit ${orders.length} comenzi`}
         </h2>
         <p className="os-sel-subtitle">
-          {orders.length === 1
+          {allHaveReturns
+            ? 'Poți descărca PDF-ul sau, dacă încă nu ai trimis coletul, anula returul.'
+            : someHaveReturns
+            ? 'Comenzile cu retur activ sunt blocate; alege una fără retur sau gestionează cele existente.'
+            : orders.length === 1
             ? 'Verifică detaliile și continuă procesul de retur.'
             : 'Alege comanda pentru care vrei să inițiezi returul.'}
         </p>
       </div>
 
       <div className="os-sel-list">
-        {orders.map((order) => {
+        {ordersView.map((order) => {
           const ledColor = getLedColor(order.eligibility.status)
           const isSelected = selectedOrderId === order.id
           const eligibilityText = getEligibilityText(order)
@@ -137,6 +257,104 @@ export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderS
             .filter(p => p.imagine && !p.id.startsWith('shipping-'))
             .slice(0, 4)
           const remaining = order.products.filter(p => !p.id.startsWith('shipping-')).length - thumbnails.length
+          const er = order.existingReturn || null
+
+          // Comenzile cu retur activ — card non-selectabil cu acțiuni dedicate
+          if (er) {
+            const colors = returnStatusColor(er.status)
+            const cancellable = canSelfCancel(er)
+            const cancelLockedByAwb = isCancellableStatus(er.status) && !!er.awbNumber
+            const isCancelling = cancellingId === er.idRetur
+            return (
+              <div key={order.id} className="os-sel-card os-sel-card-locked">
+                <div className="os-sel-radio os-sel-radio-locked" aria-hidden="true">
+                  <span style={{ fontSize: 13 }}>🔒</span>
+                </div>
+                <div className="os-sel-card-body">
+                  <div className="os-sel-card-top">
+                    <div>
+                      <h4 className="os-sel-order-number">Comandă {order.numarComanda}</h4>
+                      <p className="os-sel-meta">
+                        <span aria-hidden="true">📅</span>{' '}
+                        {new Date(order.dataComanda).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                    <div
+                      className="os-sel-pill"
+                      style={{ backgroundColor: colors.bg, color: colors.fg, borderColor: colors.border }}
+                    >
+                      <span className="os-sel-pill-dot" style={{ backgroundColor: colors.fg }} />
+                      {RETURN_STATUS_LABEL[er.status]}
+                    </div>
+                  </div>
+
+                  <div className="os-sel-er-info">
+                    <div className="os-sel-er-line">
+                      <span className="os-sel-er-label">Nr. retur:</span>
+                      <strong>{er.idRetur}</strong>
+                    </div>
+                    {er.awbNumber && (
+                      <div className="os-sel-er-line">
+                        <span className="os-sel-er-label">AWB:</span>
+                        <strong>{er.awbNumber}</strong>
+                        <span className="os-sel-er-hint">
+                          ({er.metodaTrimitere === 'curier' ? 'curier Maxari' : 'expediere'})
+                        </span>
+                      </div>
+                    )}
+                    <div className="os-sel-er-line">
+                      <span className="os-sel-er-label">Inițiat:</span>
+                      <strong>{new Date(er.createdAt).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+                    </div>
+                    <div className="os-sel-er-line">
+                      <span className="os-sel-er-label">Total rambursat:</span>
+                      <strong>{er.totalRefund.toFixed(2)} RON</strong>
+                    </div>
+                  </div>
+
+                  <div className="os-sel-er-msg">
+                    {er.status === 'FINALIZAT' ? (
+                      <>✅ Returul a fost finalizat și suma a fost rambursată.</>
+                    ) : er.status === 'PROCESAT' || er.status === 'COLET_PRIMIT' ? (
+                      <>📦 Coletul a fost primit la noi și e în procesare.</>
+                    ) : (
+                      <>⏳ Returul este înregistrat. Așteptăm coletul tău.</>
+                    )}
+                  </div>
+
+                  <div className="os-sel-er-actions">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadReturnPdf(er.idRetur, order.sessionToken)}
+                      className="os-sel-er-btn os-sel-er-btn-primary"
+                    >
+                      📄 Descarcă PDF retur
+                    </button>
+                    {cancellable && (
+                      <button
+                        type="button"
+                        onClick={() => handleCancelReturn(order)}
+                        disabled={isCancelling}
+                        className="os-sel-er-btn os-sel-er-btn-danger"
+                      >
+                        {isCancelling ? 'Se anulează…' : '✖ Anulează retur'}
+                      </button>
+                    )}
+                  </div>
+
+                  {cancelLockedByAwb && (
+                    <div className="os-sel-er-cancel-note">
+                      Pentru anulare contactează-ne pe{' '}
+                      <a href="mailto:info@maxari.ro?subject=Anulare%20retur" className="os-sel-er-cancel-link">
+                        info@maxari.ro
+                      </a>{' '}
+                      — AWB-ul de curier e deja generat și anularea trebuie aprobată de noi.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          }
 
           return (
             <div
@@ -221,19 +439,25 @@ export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderS
         })}
       </div>
 
+      {cancelError && (
+        <div className="os-sel-cancel-error">⚠️ {cancelError}</div>
+      )}
+
       <div className="os-sel-note">
         <strong>Notă:</strong> Dacă comanda nu e eligibilă, ne poți contacta pentru opțiuni extinse.
       </div>
 
-      {selectedOrderId && (
+      {(selectedOrderId || (allHaveReturns && onBack)) && (
         <div className="os-sel-actions">
           {onBack && (
-            <button onClick={onBack} className="os-sel-back">← Înapoi</button>
+            <button onClick={onBack} className="os-sel-back">← Caută altă comandă</button>
           )}
-          <button onClick={handleContinue} className="os-sel-continue">
-            Continuă
-            <span className="os-sel-arrow" aria-hidden="true">→</span>
-          </button>
+          {selectedOrderId && (
+            <button onClick={handleContinue} className="os-sel-continue">
+              Continuă
+              <span className="os-sel-arrow" aria-hidden="true">→</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -460,6 +684,120 @@ export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderS
           font-size: 13px;
           font-weight: 500;
           border: 1px solid;
+        }
+
+        /* Locked card (existing return) */
+        .os-sel-card-locked {
+          background: linear-gradient(135deg, #fafafa 0%, #f9fafb 100%);
+          border-color: #e5e7eb;
+          cursor: default;
+        }
+        .os-sel-card-locked:hover {
+          border-color: #e5e7eb;
+          background: linear-gradient(135deg, #fafafa 0%, #f9fafb 100%);
+        }
+        .os-sel-radio-locked {
+          border-color: #cbd5e1;
+          background: #f1f5f9;
+        }
+        .os-sel-er-info {
+          display: grid;
+          gap: 6px;
+          margin: 6px 0 12px 0;
+          padding: 12px 14px;
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          font-size: 13px;
+          color: #374151;
+        }
+        .os-sel-er-line {
+          display: flex;
+          gap: 8px;
+          align-items: baseline;
+          flex-wrap: wrap;
+        }
+        .os-sel-er-label {
+          color: #6b7280;
+          min-width: 110px;
+        }
+        .os-sel-er-line strong {
+          color: #111827;
+          font-weight: 600;
+        }
+        .os-sel-er-hint {
+          color: #6b7280;
+          font-size: 12px;
+        }
+        .os-sel-er-msg {
+          padding: 9px 12px;
+          border-radius: 8px;
+          background: #f0fdfa;
+          border: 1px solid #99f6e4;
+          color: #115e59;
+          font-size: 13px;
+          font-weight: 500;
+          margin-bottom: 12px;
+        }
+        .os-sel-er-actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .os-sel-er-btn {
+          flex: 1;
+          min-width: 140px;
+          padding: 10px 14px;
+          border-radius: 9px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          border: 1.5px solid transparent;
+        }
+        .os-sel-er-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .os-sel-er-btn-primary {
+          background: #fff;
+          border-color: #26a69a;
+          color: #0f766e;
+        }
+        .os-sel-er-btn-primary:hover:not(:disabled) {
+          background: #f0fdfa;
+        }
+        .os-sel-er-btn-danger {
+          background: #fff;
+          border-color: #fca5a5;
+          color: #b91c1c;
+        }
+        .os-sel-er-btn-danger:hover:not(:disabled) {
+          background: #fef2f2;
+        }
+        .os-sel-er-cancel-note {
+          margin-top: 10px;
+          padding: 9px 12px;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          color: #854d0e;
+          border-radius: 8px;
+          font-size: 12.5px;
+          line-height: 1.55;
+        }
+        .os-sel-er-cancel-link {
+          color: #854d0e;
+          font-weight: 600;
+          text-decoration: underline;
+        }
+        .os-sel-cancel-error {
+          padding: 10px 14px;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          color: #b91c1c;
+          border-radius: 10px;
+          font-size: 13px;
+          margin-bottom: 14px;
         }
 
         /* Note */

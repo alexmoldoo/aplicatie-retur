@@ -10,10 +10,20 @@ import crypto from 'crypto'
 
 const TOKEN_TTL_MS = 30 * 60 * 1000 // 30 minute
 
-// În producție, setează CUSTOMER_SESSION_SECRET în env
+const DEV_FALLBACK_SECRET = 'dev-only-customer-session-secret-change-in-production-please'
+
+// În producție obligă setarea CUSTOMER_SESSION_SECRET — fallback-ul dev compromite token-urile
 function getSecret(): string {
-  return process.env.CUSTOMER_SESSION_SECRET
-    || 'dev-only-customer-session-secret-change-in-production-please'
+  const secret = process.env.CUSTOMER_SESSION_SECRET
+  if (process.env.NODE_ENV === 'production') {
+    if (!secret || secret === DEV_FALLBACK_SECRET || secret.length < 32) {
+      throw new Error(
+        'CUSTOMER_SESSION_SECRET trebuie setat (>= 32 caractere) în producție.'
+      )
+    }
+    return secret
+  }
+  return secret || DEV_FALLBACK_SECRET
 }
 
 export interface CustomerSessionPayload {

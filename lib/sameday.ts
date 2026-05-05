@@ -1,18 +1,7 @@
 /**
  * SameDay Courier Client API wrapper.
- *
- * Suportă mod „mock" controlat prin env `SAMEDAY_MOCK=true` — util pentru
- * dezvoltare înainte de a confirma accesul la API. În mock mode toate
- * apelurile returnează date fictive, fără request-uri externe.
- *
- * Acoperă doar fluxul de „third-party pickup": curierul ridică coletul de
- * la client (third party) și îl livrează la pickup point-ul nostru. Plata
- * AWB-ului e suportată de noi (awbPayment=1).
- *
- * Documentație: PDF API Curier Client (Zitec). Sandbox:
- *   https://sameday-api.demo.zitec.com
- * Producție:
- *   https://api.sameday.ro
+ * „Third-party pickup": curierul ridică de la client și livrează la pickup point-ul nostru.
+ * Plata AWB e suportată de noi (awbPayment=1).
  */
 
 const SAMEDAY_BASE_URL = process.env.SAMEDAY_BASE_URL || 'https://api.sameday.ro'
@@ -21,7 +10,6 @@ const SAMEDAY_PASSWORD = process.env.SAMEDAY_PASSWORD || ''
 const SAMEDAY_PICKUP_POINT_ID = process.env.SAMEDAY_PICKUP_POINT_ID || ''
 const SAMEDAY_CONTACT_PERSON_ID = process.env.SAMEDAY_CONTACT_PERSON_ID || ''
 const SAMEDAY_SERVICE_ID = process.env.SAMEDAY_SERVICE_ID || ''
-const SAMEDAY_MOCK = process.env.SAMEDAY_MOCK === 'true'
 
 export interface PickupAddress {
   name: string
@@ -51,7 +39,6 @@ export interface AWBResult {
   awbNumber: string
   awbPdfUrl: string | null
   cost: number
-  isMock: boolean
 }
 
 interface CachedToken {
@@ -67,16 +54,12 @@ let cachedToken: CachedToken | null = null
  * Răspuns: { token, expire_at } — token TTL implicit ~12h.
  */
 export async function authenticate(): Promise<string> {
-  if (SAMEDAY_MOCK) {
-    return 'MOCK-TOKEN'
-  }
-
   if (cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.token
   }
 
   if (!SAMEDAY_USERNAME || !SAMEDAY_PASSWORD) {
-    throw new Error('SAMEDAY_USERNAME / SAMEDAY_PASSWORD lipsesc din env. Setați credentials sau activați SAMEDAY_MOCK=true.')
+    throw new Error('SAMEDAY_USERNAME / SAMEDAY_PASSWORD lipsesc din env.')
   }
 
   const res = await fetch(`${SAMEDAY_BASE_URL}/api/authenticate`, {
@@ -122,15 +105,6 @@ export async function authenticate(): Promise<string> {
  *  - SAMEDAY_SERVICE_ID         (din GET /api/client/services)
  */
 export async function createReturnAWB(params: CreateAWBParams): Promise<AWBResult> {
-  if (SAMEDAY_MOCK) {
-    return {
-      awbNumber: `MOCK-AWB-${Date.now()}`,
-      awbPdfUrl: null,
-      cost: 19.99,
-      isMock: true,
-    }
-  }
-
   if (!SAMEDAY_PICKUP_POINT_ID || !SAMEDAY_CONTACT_PERSON_ID || !SAMEDAY_SERVICE_ID) {
     throw new Error(
       'Configurare SameDay incompletă. Setați SAMEDAY_PICKUP_POINT_ID, SAMEDAY_CONTACT_PERSON_ID și SAMEDAY_SERVICE_ID din contul SameDay.'
@@ -224,8 +198,5 @@ export async function createReturnAWB(params: CreateAWBParams): Promise<AWBResul
     awbNumber,
     awbPdfUrl,
     cost: typeof data.cost === 'number' ? data.cost : 19.99,
-    isMock: false,
   }
 }
-
-export const isMockMode = SAMEDAY_MOCK

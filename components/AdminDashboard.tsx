@@ -19,6 +19,23 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [showShopifyEdit, setShowShopifyEdit] = useState(false)
   const [excludedSKUs, setExcludedSKUs] = useState<string[]>(['RMA-009', 'RMA-025'])
   const [newSKU, setNewSKU] = useState('')
+
+  // Adresa de retur (afișată clienților care aleg „manual")
+  const [adresaRetur, setAdresaRetur] = useState({
+    companie: 'Maxari',
+    strada: '',
+    oras: '',
+    judet: '',
+    codPostal: '',
+    tara: 'România',
+    telefon: '-',
+  })
+  const [costCurier, setCostCurier] = useState<string>('19.99')
+  const [savingAdresa, setSavingAdresa] = useState(false)
+
+  // Logo magazin (folosit în PDF retur)
+  const [logo, setLogo] = useState<string | null>(null)
+  const [savingLogo, setSavingLogo] = useState(false)
   
   // Returns state
   const [returns, setReturns] = useState<any[]>([])
@@ -29,7 +46,107 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   useEffect(() => {
     loadConfig()
+    loadAdresaRetur()
   }, [])
+
+  const loadAdresaRetur = async () => {
+    try {
+      const res = await fetch('/api/config/return-info')
+      const data = await res.json()
+      if (data.success) {
+        if (data.adresaRetur) setAdresaRetur(data.adresaRetur)
+        if (data.transportCosts?.curier != null) {
+          setCostCurier(String(data.transportCosts.curier))
+        }
+        if (data.logo) setLogo(data.logo)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleLogoFile = async (file: File) => {
+    if (!file) return
+    if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
+      setError('Logo invalid. Acceptate: PNG, JPG, WEBP.')
+      return
+    }
+    if (file.size > 1_000_000) {
+      setError('Logo-ul depășește 1 MB. Folosește o imagine mai mică.')
+      return
+    }
+    setError(null)
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result))
+      r.onerror = reject
+      r.readAsDataURL(file)
+    })
+    setLogo(dataUrl)
+    await saveLogo(dataUrl)
+  }
+
+  const saveLogo = async (value: string | null) => {
+    setSavingLogo(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await fetch('/api/config/return-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logo: value }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setSuccess(value ? 'Logo salvat.' : 'Logo eliminat.')
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        setError(data.message || 'Eroare la salvarea logo-ului')
+      }
+    } catch {
+      setError('Eroare la conectare.')
+    } finally {
+      setSavingLogo(false)
+    }
+  }
+
+  const handleRemoveLogo = async () => {
+    setLogo(null)
+    await saveLogo(null)
+  }
+
+  const handleSaveAdresaRetur = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setSuccess(null)
+    setSavingAdresa(true)
+    try {
+      const cost = parseFloat(costCurier)
+      const res = await fetch('/api/config/return-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adresaRetur,
+          transportCosts: Number.isFinite(cost) && cost >= 0 ? { curier: cost } : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setSuccess('Adresa de retur salvată.')
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        setError(data.message || 'Eroare la salvare')
+      }
+    } catch {
+      setError('Eroare la conectare.')
+    } finally {
+      setSavingAdresa(false)
+    }
+  }
+
+  const updateAdresaField = (field: keyof typeof adresaRetur, value: string) => {
+    setAdresaRetur(prev => ({ ...prev, [field]: value }))
+  }
 
   // Încarcă retururile când se schimbă tab-ul la 'returns'
   useEffect(() => {
@@ -563,6 +680,288 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           </form>
         )}
       </div>
+
+      {/* Logo magazin (folosit în PDF-ul de retur) */}
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '32px',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+        marginBottom: '24px'
+      }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
+          Logo magazin
+        </h2>
+        <p style={{ fontSize: '13px', color: '#666', marginBottom: '20px' }}>
+          Imaginea apare în antetul PDF-ului de retur. Recomandat: PNG cu fundal transparent, max 1 MB,
+          ideal cu raport ~2:1 (lățime:înălțime).
+        </p>
+
+        <div style={{
+          display: 'flex',
+          gap: '20px',
+          alignItems: 'center',
+          flexWrap: 'wrap'
+        }}>
+          <div style={{
+            width: '160px',
+            height: '80px',
+            borderRadius: '12px',
+            border: '1px dashed #d1d5db',
+            background: logo ? '#fff' : '#fafafa',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            flexShrink: 0
+          }}>
+            {logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logo}
+                alt="Logo magazin"
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              />
+            ) : (
+              <span style={{ color: '#9ca3af', fontSize: '12px' }}>Niciun logo</span>
+            )}
+          </div>
+
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <label style={{
+              display: 'inline-block',
+              padding: '10px 18px',
+              borderRadius: '8px',
+              background: savingLogo ? '#ccc' : '#26a69a',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: savingLogo ? 'not-allowed' : 'pointer',
+              marginRight: '10px'
+            }}>
+              {savingLogo ? 'Se încarcă...' : (logo ? 'Înlocuiește logo' : 'Încarcă logo')}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={savingLogo}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleLogoFile(f)
+                  e.target.value = '' // permite reupload același fișier
+                }}
+                style={{ display: 'none' }}
+              />
+            </label>
+
+            {logo && (
+              <button
+                type="button"
+                onClick={handleRemoveLogo}
+                disabled={savingLogo}
+                style={{
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  background: 'transparent',
+                  color: '#dc2626',
+                  border: '1px solid #fecaca',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: savingLogo ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Șterge logo
+              </button>
+            )}
+
+            <p style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>
+              Format: PNG / JPG / WEBP. Salvat automat la încărcare.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Adresa de retur (pentru clienții care aleg „trimit eu coletul") */}
+      <form onSubmit={handleSaveAdresaRetur}>
+        <div style={{
+          backgroundColor: '#fff',
+          borderRadius: '16px',
+          padding: '32px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+          marginBottom: '24px'
+        }}>
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
+            Adresa de retur
+          </h2>
+          <p style={{ fontSize: '13px', color: '#666', marginBottom: '20px' }}>
+            Afișată clienților DOAR când aleg să trimită singuri coletul (curier propriu).
+            Pentru cei care folosesc curierul nostru, AWB-ul e generat automat — adresa nu apare.
+          </p>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '12px'
+          }}>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Companie / Destinatar *
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.companie}
+                onChange={(e) => updateAdresaField('companie', e.target.value)}
+                placeholder="Maxari"
+                required
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Stradă *
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.strada}
+                onChange={(e) => updateAdresaField('strada', e.target.value)}
+                placeholder="Șoseaua Sibiului, nr. 11"
+                required
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Oraș *
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.oras}
+                onChange={(e) => updateAdresaField('oras', e.target.value)}
+                placeholder="Mediaș"
+                required
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Județ *
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.judet}
+                onChange={(e) => updateAdresaField('judet', e.target.value)}
+                placeholder="Sibiu"
+                required
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Cod poștal *
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.codPostal}
+                onChange={(e) => updateAdresaField('codPostal', e.target.value)}
+                placeholder="551129"
+                required
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Țară
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.tara}
+                onChange={(e) => updateAdresaField('tara', e.target.value)}
+                placeholder="România"
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Telefon (opțional, „-" = ascuns)
+              </label>
+              <input
+                type="text"
+                value={adresaRetur.telefon}
+                onChange={(e) => updateAdresaField('telefon', e.target.value)}
+                placeholder="-"
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', fontSize: '13px' }}>
+                Cost curier nostru (RON)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={costCurier}
+                onChange={(e) => setCostCurier(e.target.value)}
+                placeholder="19.99"
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '8px',
+                  border: '1px solid #e0e0e0', fontSize: '14px', outline: 'none'
+                }}
+              />
+              <p style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                Sumă dedusă din refund când clientul alege curierul nostru.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={savingAdresa}
+            style={{
+              marginTop: '24px',
+              width: '100%',
+              padding: '12px 24px',
+              borderRadius: '8px',
+              background: savingAdresa ? '#ccc' : 'linear-gradient(90deg, #2196F3 0%, #4CAF50 100%)',
+              color: '#fff',
+              border: 'none',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: savingAdresa ? 'not-allowed' : 'pointer',
+              opacity: savingAdresa ? 0.6 : 1
+            }}
+          >
+            {savingAdresa ? 'Se salvează...' : 'Salvează adresa de retur'}
+          </button>
+        </div>
+      </form>
 
       {/* SKU-uri excluse */}
       <form onSubmit={handleSaveSKUs}>

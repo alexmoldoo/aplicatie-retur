@@ -7,8 +7,15 @@ import { logAudit } from '@/lib/audit'
 import { getClientIp, makeRateLimiter, isAllowedOrigin, formatWaitTime } from '@/lib/security'
 import { isBlocked, recordFail } from '@/lib/ip-blocklist'
 import { createReturnAWB } from '@/lib/sameday'
+import { validateRomanianIBAN } from '@/lib/iban-validator'
 import fs from 'fs'
 import path from 'path'
+
+const MAX_PRODUCTS = 50
+const MAX_QTY_PER_PRODUCT = 50
+const MAX_PRICE_PER_PRODUCT = 50000
+const MAX_SIGNATURE_BYTES = 250_000 // ~180KB PNG base64 reasonable
+const ALLOWED_TRANSPORT_COSTS = new Set([0, 15.99])
 
 export const dynamic = 'force-dynamic'
 
@@ -111,20 +118,85 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Validare produse: array, dimensiune, cantități + prețuri pozitive
+    if (!Array.isArray(products) || products.length === 0 || products.length > MAX_PRODUCTS) {
+      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_products_array', count: products?.length } })
+      return NextResponse.json(
+        { success: false, message: 'Lista de produse este invalidă.' },
+        { status: 400 }
+      )
+    }
+    for (const p of products) {
+      const qty = p.cantitateReturnata || (p.selected ? p.cantitate : 0)
+      const price = Number(p.pret)
+      if (!Number.isFinite(qty) || qty < 0 || qty > MAX_QTY_PER_PRODUCT) {
+        await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_quantity', qty } })
+        return NextResponse.json({ success: false, message: 'Cantitate invalidă.' }, { status: 400 })
+      }
+      if (!Number.isFinite(price) || price < 0 || price > MAX_PRICE_PER_PRODUCT) {
+        await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_price', price } })
+        return NextResponse.json({ success: false, message: 'Preț invalid.' }, { status: 400 })
+      }
+    }
+
+    // Validare semnătură (data URL PNG, sub limită)
+    if (
+      typeof signature !== 'string' ||
+      !signature.startsWith('data:image/png;base64,') ||
+      signature.length > MAX_SIGNATURE_BYTES
+    ) {
+      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_signature' } })
+      return NextResponse.json(
+        { success: false, message: 'Semnătura este invalidă.' },
+        { status: 400 }
+      )
+    }
+
+    // Validare IBAN (același validator ca în UI)
+    const ibanCheck = validateRomanianIBAN(refundData.iban || '')
+    if (!ibanCheck.valid) {
+      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_iban' } })
+      return NextResponse.json(
+        { success: false, message: ibanCheck.error || 'IBAN invalid.' },
+        { status: 400 }
+      )
+    }
+    if (!refundData.numeTitular || refundData.numeTitular.trim().length < 2) {
+      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_holder' } })
+      return NextResponse.json(
+        { success: false, message: 'Numele titularului este obligatoriu.' },
+        { status: 400 }
+      )
+    }
+
     // Calculare subtotal produse (fără cost transport)
     const subtotalProduse = products.reduce((sum, p) => {
       const cantitateReturnata = p.cantitateReturnata || (p.selected ? p.cantitate : 0)
       return sum + (p.pret * cantitateReturnata)
     }, 0)
 
-    // Validare metoda de trimitere + cost transport
+    // Validare metoda de trimitere + cost transport (whitelist server-side)
     const metodaTrimitere = refundData.metodaTrimitere
-    const costTransport = typeof refundData.costTransport === 'number' ? refundData.costTransport : 0
+    const costTransportRaw = typeof refundData.costTransport === 'number' ? refundData.costTransport : 0
 
-    if (!metodaTrimitere) {
+    if (!metodaTrimitere || (metodaTrimitere !== 'curier' && metodaTrimitere !== 'manual')) {
       await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_shipping_method' } })
       return NextResponse.json(
         { success: false, message: 'Metoda de trimitere lipsește.' },
+        { status: 400 }
+      )
+    }
+
+    // Forțează costul corect server-side (ignorăm valoarea trimisă dacă nu e în whitelist)
+    const costTransport = metodaTrimitere === 'curier' ? 15.99 : 0
+    if (!ALLOWED_TRANSPORT_COSTS.has(costTransportRaw) || costTransportRaw !== costTransport) {
+      await logAudit({
+        action: 'create_return_fail',
+        ip,
+        details: { reason: 'cost_transport_mismatch', sent: costTransportRaw, expected: costTransport },
+      })
+      return NextResponse.json(
+        { success: false, message: 'Cost transport invalid.' },
         { status: 400 }
       )
     }

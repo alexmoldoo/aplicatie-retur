@@ -17,6 +17,8 @@ export type AuditAction =
   | 'create_return_rate_limited'
   | 'create_return_origin_blocked'
   | 'create_return_awb_fail'
+  | 'return_cancel_customer'
+  | 'return_cancel_denied'
   | 'admin_login_success'
   | 'admin_login_fail'
 

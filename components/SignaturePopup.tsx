@@ -183,8 +183,11 @@ export default function SignaturePopup({
         throw new Error(result.message || 'Failed to create return')
       }
       
-      // Descarcă PDF-ul generat
-      const pdfResponse = await fetch(result.pdfPath)
+      // Descarcă PDF-ul generat (pdfPath include deja token-ul de sesiune)
+      const pdfUrl0 = result.pdfPath
+        ? `${result.pdfPath}${result.pdfPath.includes('?') ? '&' : '?'}token=${encodeURIComponent(sessionToken || '')}`
+        : ''
+      const pdfResponse = await fetch(pdfUrl0)
       const pdfBlob = await pdfResponse.blob()
       const pdfUrl = window.URL.createObjectURL(pdfBlob)
       const link = document.createElement('a')

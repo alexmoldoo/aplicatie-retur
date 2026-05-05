@@ -4,6 +4,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -117,18 +118,29 @@ export interface Return {
   packageLabelPhoto?: string // Poză etichetă colet (path sau data URL)
 }
 
-/**
- * Hash-uiește o parolă
- */
-export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex')
+const BCRYPT_ROUNDS = 12
+const LEGACY_SHA256_RE = /^[a-f0-9]{64}$/i
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS)
 }
 
-/**
- * Verifică o parolă
- */
-export function verifyPassword(password: string, hash: string): boolean {
-  return hashPassword(password) === hash
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  if (!hash) return false
+  if (LEGACY_SHA256_RE.test(hash)) {
+    // Legacy SHA-256 hash — accept dacă se potrivește, dar caller ar trebui să facă rehash.
+    const legacy = crypto.createHash('sha256').update(password).digest('hex')
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(legacy, 'hex'))
+  }
+  try {
+    return await bcrypt.compare(password, hash)
+  } catch {
+    return false
+  }
+}
+
+export function isLegacyPasswordHash(hash: string): boolean {
+  return LEGACY_SHA256_RE.test(hash)
 }
 
 /**
@@ -222,13 +234,14 @@ export async function createUser(nume: string, prenume: string, email: string, p
       throw new Error('Utilizatorul cu acest email există deja')
     }
     
+    const passwordHashValue = await hashPassword(password)
     const { data, error } = await supabase
       .from('users')
       .insert({
         nume,
         prenume,
         email: email.toLowerCase(),
-        password_hash: hashPassword(password),
+        password_hash: passwordHashValue,
       })
       .select()
       .single()
@@ -261,7 +274,7 @@ export async function createUser(nume: string, prenume: string, email: string, p
     nume,
     prenume,
     email: email.toLowerCase(),
-    passwordHash: hashPassword(password),
+    passwordHash: await hashPassword(password),
     createdAt: new Date().toISOString(),
   }
   
@@ -627,6 +640,54 @@ export async function findReturnById(idRetur: string): Promise<Return | null> {
   // Fallback la JSON
   const returns = await getReturns()
   return returns.find(r => r.idRetur === idRetur) || null
+}
+
+/**
+ * Găsește cel mai recent retur asociat unui număr de comandă (sau null).
+ * Filtrează implicit returnurile anulate ca să nu blocheze un nou retur valid.
+ */
+export async function findReturnByOrderNumber(
+  numarComanda: string,
+  opts?: { includeCancelled?: boolean }
+): Promise<Return | null> {
+  const includeCancelled = !!opts?.includeCancelled
+  if (supabase) {
+    let query = supabase
+      .from('returns')
+      .select('*')
+      .eq('numar_comanda', numarComanda)
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (!includeCancelled) {
+      query = query.neq('status', 'ANULAT')
+    }
+    const { data, error } = await query
+    if (error || !data || data.length === 0) return null
+    const row = data[0]
+    return {
+      idRetur: row.id_retur,
+      numarComanda: row.numar_comanda,
+      orderData: row.order_data,
+      products: row.products,
+      refundData: row.refund_data,
+      signature: row.signature,
+      totalRefund: parseFloat(row.total_refund),
+      status: row.status,
+      createdAt: row.created_at,
+      pdfPath: row.pdf_path || '',
+      qrCodeData: row.qr_code_data || '',
+      awbNumber: row.awb_number,
+      shippingReceiptPhoto: row.shipping_receipt_photo,
+      packageLabelPhoto: row.package_label_photo,
+    }
+  }
+
+  const returns = await getReturns()
+  const filtered = returns
+    .filter(r => r.numarComanda === numarComanda)
+    .filter(r => includeCancelled || r.status !== 'ANULAT')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  return filtered[0] || null
 }
 
 /**

@@ -196,7 +196,11 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
   if (searchStep === 'found' && foundOrders.length > 0) {
     return (
       <>
-        <OrderSelection orders={foundOrders} onSelectOrder={handleOrderSelect} />
+        <OrderSelection
+          orders={foundOrders}
+          onSelectOrder={handleOrderSelect}
+          onBack={handleResetAll}
+        />
       </>
     )
   }
@@ -272,7 +276,7 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
                   setValidationErrors(newErrors)
                 }
               }}
-              placeholder="Ex: Ion Popescu"
+              placeholder=""
               required={!(email && !numarComanda && !telefon)}
               disabled={loading}
               autoComplete="name"
@@ -315,7 +319,7 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
                     setValidationErrors(newErrors)
                   }
                 }}
-                placeholder="Ex: #MX12345 sau 12345"
+                placeholder=""
                 required={!telefon}
                 disabled={loading}
                 autoComplete="off"
@@ -362,7 +366,7 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
                     setValidationErrors(newErrors)
                   }
                 }}
-                placeholder="0712 345 678"
+                placeholder=""
                 required={!numarComanda}
                 disabled={loading}
                 autoComplete="tel"
@@ -403,7 +407,7 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
                       setValidationErrors(newErrors)
                     }
                   }}
-                  placeholder="nume@exemplu.ro"
+                  placeholder=""
                   disabled={loading}
                   autoComplete="email"
                   inputMode="email"

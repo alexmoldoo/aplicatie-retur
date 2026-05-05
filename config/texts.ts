@@ -198,8 +198,9 @@ export const appTexts = {
       title: 'Contact',
       info: {
         title: 'Informații de contact',
-        email: 'contact@maxari.ro',
-        telefon: '+40 123 456 789',
+        email: 'info@maxari.ro',
+        whatsapp: '+40770404859',
+        whatsappLink: 'https://wa.me/40770404859',
         program: 'Luni - Vineri: 9:00 - 18:00',
       },
       form: {

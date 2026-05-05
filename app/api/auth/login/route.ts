@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verifică parola
-    if (!verifyPassword(password, user.passwordHash)) {
+    if (!(await verifyPassword(password, user.passwordHash))) {
       await logAudit({ action: 'admin_login_fail', ip, details: { email, reason: 'wrong_password' } })
       return NextResponse.json(
         { success: false, message: 'Email sau parolă incorectă' },

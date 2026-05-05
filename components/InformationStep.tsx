@@ -30,13 +30,13 @@ interface TransportCosts {
 }
 
 const FALLBACK_ADRESA: AdresaRetur = {
-  companie: 'RED MAXARI',
+  companie: 'Maxari',
   strada: 'Șoseaua Sibiului, nr. 11',
   oras: 'Mediaș',
   judet: 'Sibiu',
   codPostal: '551129',
   tara: 'România',
-  telefon: '+40770404859',
+  telefon: '-',
 }
 const FALLBACK_COSTS: TransportCosts = { curier: 19.99 }
 
@@ -87,8 +87,17 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
   const cost = metoda === 'curier' ? costuri.curier : 0
   const totalRefund = Math.max(0, subtotal - cost)
 
+  const showTelefon = adresa.telefon && adresa.telefon.trim() !== '' && adresa.telefon.trim() !== '-'
+
   const handleCopyAdresa = async () => {
-    const text = `${adresa.companie}\n${adresa.strada}\n${adresa.oras}, ${adresa.judet} ${adresa.codPostal}\n${adresa.tara}\nTel: ${adresa.telefon}`
+    const lines = [
+      adresa.companie,
+      adresa.strada,
+      `${adresa.oras}, ${adresa.judet} ${adresa.codPostal}`,
+      adresa.tara,
+    ]
+    if (showTelefon) lines.push(`Tel: ${adresa.telefon}`)
+    const text = lines.join('\n')
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -158,23 +167,6 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
           <span>{error}</span>
         </div>
       )}
-
-      {/* Adresa de retur */}
-      <div className="is-card">
-        <div className="is-card-head">
-          <h3 className="is-card-title">📍 Adresa de retur</h3>
-          <button type="button" onClick={handleCopyAdresa} className="is-copy-btn">
-            {copied ? '✓ Copiat' : 'Copiază'}
-          </button>
-        </div>
-        <div className="is-address">
-          <div className="is-address-line is-address-name">{adresa.companie}</div>
-          <div className="is-address-line">{adresa.strada}</div>
-          <div className="is-address-line">{adresa.oras}, {adresa.judet} {adresa.codPostal}</div>
-          <div className="is-address-line">{adresa.tara}</div>
-          <div className="is-address-line is-address-phone">📞 {adresa.telefon}</div>
-        </div>
-      </div>
 
       {/* Pregătește coletul */}
       <div className="is-card">
@@ -276,6 +268,49 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
               </p>
             </div>
           </label>
+
+          {/* Adresa de retur — afișată doar pentru manual */}
+          {metoda === 'manual' && (
+            <div className="is-card is-address-card">
+              <div className="is-card-head">
+                <h3 className="is-card-title">📍 Adresa de retur</h3>
+                <button type="button" onClick={handleCopyAdresa} className="is-copy-btn">
+                  {copied ? '✓ Copiat' : 'Copiază'}
+                </button>
+              </div>
+              <p className="is-card-text">Trimite coletul la adresa de mai jos cu orice curier preferi.</p>
+              <div className="is-address">
+                <div className="is-address-row">
+                  <span className="is-address-label">Destinatar:</span>
+                  <span className="is-address-value is-address-name">{adresa.companie}</span>
+                </div>
+                <div className="is-address-row">
+                  <span className="is-address-label">Stradă:</span>
+                  <span className="is-address-value">{adresa.strada}</span>
+                </div>
+                <div className="is-address-row">
+                  <span className="is-address-label">Oraș:</span>
+                  <span className="is-address-value">{adresa.oras}</span>
+                </div>
+                <div className="is-address-row">
+                  <span className="is-address-label">Județ:</span>
+                  <span className="is-address-value">{adresa.judet}</span>
+                </div>
+                <div className="is-address-row">
+                  <span className="is-address-label">Cod poștal:</span>
+                  <span className="is-address-value">{adresa.codPostal}</span>
+                </div>
+                <div className="is-address-row">
+                  <span className="is-address-label">Țară:</span>
+                  <span className="is-address-value">{adresa.tara}</span>
+                </div>
+                <div className="is-address-row">
+                  <span className="is-address-label">Nr. telefon:</span>
+                  <span className="is-address-value is-address-phone">{showTelefon ? adresa.telefon : '-'}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -362,6 +397,13 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
           border-radius: 12px;
           margin-bottom: 18px;
         }
+        .is-address-card {
+          margin-top: 4px;
+          margin-bottom: 0;
+          background: #fff;
+          border: 1.5px solid #26a69a;
+          animation: is-fadein 0.25s ease;
+        }
         .is-card-head {
           display: flex;
           justify-content: space-between;
@@ -401,17 +443,37 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
         .is-address {
           font-size: 14px;
           color: #111827;
-          line-height: 1.6;
+          line-height: 1.5;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .is-address-row {
+          display: grid;
+          grid-template-columns: 110px 1fr;
+          gap: 8px;
+          align-items: baseline;
+        }
+        .is-address-label {
+          font-size: 13px;
+          color: #6b7280;
+          font-weight: 600;
+        }
+        .is-address-value {
+          color: #111827;
+          word-break: break-word;
         }
         .is-address-name {
           font-weight: 700;
-          font-size: 15px;
-          margin-bottom: 2px;
         }
         .is-address-phone {
-          margin-top: 4px;
           color: #26a69a;
           font-weight: 600;
+        }
+        @media (max-width: 480px) {
+          .is-address-row {
+            grid-template-columns: 100px 1fr;
+          }
         }
 
         .is-checklist {

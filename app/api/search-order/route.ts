@@ -7,13 +7,12 @@ import {
   enrichOrdersWithProductImages
 } from '@/lib/shopify'
 import { calculateEligibility } from '@/lib/eligibility'
-import { getConfig } from '@/lib/db'
+import { getConfig, findReturnByOrderNumber } from '@/lib/db'
 import { matchNames } from '@/lib/name-matcher'
 import { createCustomerToken } from '@/lib/customer-session'
 import { logAudit } from '@/lib/audit'
 import { getClientIp, makeRateLimiter, formatWaitTime } from '@/lib/security'
 import { isBlocked, recordFail } from '@/lib/ip-blocklist'
-import { isShopifyMock, findMockOrders } from '@/lib/mock-shopify'
 
 const HUMAN_MIN_FILL_TIME_MS = 1500 // sub atât → suspect bot
 
@@ -43,6 +42,31 @@ function getCached(key: string): any | null {
     return null
   }
   return entry.data
+}
+
+async function enrichWithExistingReturns<T extends { numarComanda: string }>(orders: T[]): Promise<(T & { existingReturn: any | null })[]> {
+  return Promise.all(
+    orders.map(async (order) => {
+      try {
+        const existing = await findReturnByOrderNumber(order.numarComanda)
+        if (!existing) return { ...order, existingReturn: null }
+        return {
+          ...order,
+          existingReturn: {
+            idRetur: existing.idRetur,
+            status: existing.status,
+            awbNumber: existing.awbNumber || null,
+            createdAt: existing.createdAt,
+            totalRefund: existing.totalRefund,
+            metodaTrimitere: (existing.refundData as any)?.metodaTrimitere || null,
+          },
+        }
+      } catch (e) {
+        console.warn('findReturnByOrderNumber failed for', order.numarComanda, e)
+        return { ...order, existingReturn: null }
+      }
+    })
+  )
 }
 
 function setCached(key: string, data: any): void {
@@ -146,43 +170,6 @@ export async function POST(request: NextRequest) {
     if (cached) {
       console.log('Cache hit for search-order:', cacheKey)
       return NextResponse.json(cached)
-    }
-
-    // MOCK MODE — pentru test end-to-end fără Shopify real (SHOPIFY_MOCK=true)
-    if (isShopifyMock) {
-      console.log('SHOPIFY_MOCK active — searching in fixture data')
-      const mockOrders = findMockOrders({ orderNumber, phone, email, fullName })
-
-      if (mockOrders.length === 0) {
-        return failNotFound({ needsEmail: !email })
-      }
-
-      const baseOrders = convertShopifyOrdersToAppFormat(mockOrders)
-      const convertedOrders = baseOrders.map(order => ({
-        ...order,
-        eligibility: calculateEligibility(order.dataComanda),
-        sessionToken: createCustomerToken({
-          orderId: String(order.id),
-          numarComanda: order.numarComanda,
-          nume: order.nume || '',
-        }),
-      }))
-
-      convertedOrders.sort((a, b) => {
-        if (a.eligibility.status === 'eligible' && b.eligibility.status !== 'eligible') return -1
-        if (a.eligibility.status !== 'eligible' && b.eligibility.status === 'eligible') return 1
-        return 0
-      })
-
-      const successPayload = {
-        success: true,
-        orders: convertedOrders,
-        message: convertedOrders.length === 1
-          ? 'Comanda a fost găsită cu succes! (mock mode)'
-          : `Am găsit ${convertedOrders.length} comenzi! (mock mode)`,
-      }
-      setCached(cacheKey, successPayload)
-      return NextResponse.json(successPayload)
     }
 
     // Obține credențialele Shopify din configurație sau variabilele de mediu
@@ -390,18 +377,20 @@ export async function POST(request: NextRequest) {
         return 0
       })
 
+      const enrichedOrders = await enrichWithExistingReturns(convertedOrders)
+
       const successPayload = {
         success: true,
-        orders: convertedOrders,
-        message: convertedOrders.length === 1
+        orders: enrichedOrders,
+        message: enrichedOrders.length === 1
           ? 'Comanda a fost găsită cu succes!'
-          : `Am găsit ${convertedOrders.length} comenzi!`,
+          : `Am găsit ${enrichedOrders.length} comenzi!`,
       }
       setCached(cacheKey, successPayload)
       await logAudit({
         action: 'search_order_success',
         ip,
-        details: { count: convertedOrders.length, ordersFound: convertedOrders.map(o => o.numarComanda) },
+        details: { count: enrichedOrders.length, ordersFound: enrichedOrders.map(o => o.numarComanda) },
       })
       return NextResponse.json(successPayload)
     }
