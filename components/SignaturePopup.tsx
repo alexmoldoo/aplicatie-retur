@@ -4,6 +4,17 @@ import { useState, useRef, useEffect } from 'react'
 import { OrderData, Product, RefundData } from './ReturnProcess'
 // Remove static import, use dynamic import instead
 
+function triggerBrowserDownload(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
 interface SignaturePopupProps {
   isOpen: boolean
   onClose: () => void
@@ -183,20 +194,43 @@ export default function SignaturePopup({
         throw new Error(result.message || 'Failed to create return')
       }
       
-      // Descarcă PDF-ul generat (pdfPath include deja token-ul de sesiune)
+      // Obține PDF-ul ca blob (pdfPath include deja token-ul de sesiune)
       const pdfUrl0 = result.pdfPath
         ? `${result.pdfPath}${result.pdfPath.includes('?') ? '&' : '?'}token=${encodeURIComponent(sessionToken || '')}`
         : ''
       const pdfResponse = await fetch(pdfUrl0)
       const pdfBlob = await pdfResponse.blob()
-      const pdfUrl = window.URL.createObjectURL(pdfBlob)
-      const link = document.createElement('a')
-      link.href = pdfUrl
-      link.download = `${result.returnId}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(pdfUrl)
+      const fileName = `${result.returnId}.pdf`
+
+      // Pe mobil (iOS/Android) deschidem direct sheet-ul nativ de share — userul
+      // poate alege „Save to Files", „Mail", „WhatsApp" etc. fără să iasă din
+      // sesiunea curentă. Pe desktop sau dacă API-ul lipsește, fallback la link
+      // de download clasic.
+      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' })
+      const nav = navigator as Navigator & {
+        canShare?: (data: { files: File[] }) => boolean
+        share?: (data: { files: File[]; title?: string; text?: string }) => Promise<void>
+      }
+      const canShareFiles = !!(nav.canShare && nav.canShare({ files: [pdfFile] }) && nav.share)
+
+      if (canShareFiles) {
+        try {
+          await nav.share!({
+            files: [pdfFile],
+            title: `Retur ${result.returnId}`,
+            text: `Formular retur ${result.returnId}`,
+          })
+        } catch (err: any) {
+          // AbortError = userul a închis sheet-ul. Nu fallback la download — l-am
+          // deranja cu o descărcare după ce a ales să nu salveze.
+          if (err?.name !== 'AbortError') {
+            console.warn('Share failed, falling back to download:', err)
+            triggerBrowserDownload(pdfBlob, fileName)
+          }
+        }
+      } else {
+        triggerBrowserDownload(pdfBlob, fileName)
+      }
 
       // Salvează AWB-ul pentru afișare (dacă există)
       if (result.awbNumber) setAwbNumber(result.awbNumber)
