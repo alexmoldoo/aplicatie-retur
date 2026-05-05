@@ -9,8 +9,8 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
-const supabaseUrl = process.env.SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
 
 // Client Supabase pentru server-side
 const supabase = supabaseUrl && supabaseServiceKey
@@ -24,31 +24,49 @@ const USERS_FILE = path.join(DB_DIR, 'users.json')
 const CONFIG_FILE = path.join(DB_DIR, 'config.json')
 const RETURNS_FILE = path.join(DB_DIR, 'returns.json')
 
-// Inițializează fișierele JSON pentru fallback (doar dacă Supabase nu este configurat)
-if (!supabase) {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true })
-  }
-  if (!fs.existsSync(RETURNS_DIR)) {
-    fs.mkdirSync(RETURNS_DIR, { recursive: true })
-  }
-  if (!fs.existsSync(USERS_FILE)) {
-    fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2))
-  }
-  if (!fs.existsSync(CONFIG_FILE)) {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify({
-      shopify: {
-        domain: '',
-        accessToken: '',
-        shopTitle: '',
-      },
-      excludedSKUs: [],
-    }, null, 2))
-  }
-  if (!fs.existsSync(RETURNS_FILE)) {
-    fs.writeFileSync(RETURNS_FILE, JSON.stringify([], null, 2))
+// Detectăm Vercel: filesystem read-only acolo, fallback JSON nu e posibil.
+// Pe Vercel sărim peste inițializarea fișierelor și forțăm folosirea Supabase.
+const IS_VERCEL = !!process.env.VERCEL
+
+// Inițializează fișierele JSON pentru fallback (DOAR în dev local fără Supabase
+// și NU pe Vercel — acolo filesystem-ul e read-only).
+if (!supabase && !IS_VERCEL) {
+  try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true })
+    }
+    if (!fs.existsSync(RETURNS_DIR)) {
+      fs.mkdirSync(RETURNS_DIR, { recursive: true })
+    }
+    if (!fs.existsSync(USERS_FILE)) {
+      fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2))
+    }
+    if (!fs.existsSync(CONFIG_FILE)) {
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify({
+        shopify: { domain: '', accessToken: '', shopTitle: '' },
+        excludedSKUs: [],
+      }, null, 2))
+    }
+    if (!fs.existsSync(RETURNS_FILE)) {
+      fs.writeFileSync(RETURNS_FILE, JSON.stringify([], null, 2))
+    }
+  } catch (err) {
+    console.warn('[db] Nu s-au putut inițializa fișierele JSON locale:', err)
   }
 }
+
+function requireSupabase(): NonNullable<typeof supabase> {
+  if (!supabase) {
+    throw new Error(
+      'Supabase nu este configurat: setează SUPABASE_URL și SUPABASE_SERVICE_ROLE_KEY (Production scope) în Vercel.'
+    )
+  }
+  return supabase
+}
+
+// Pe Vercel orice scriere/citire trebuie să meargă la Supabase. Dacă lipsește,
+// la primul apel real al unei funcții DB se va arunca eroarea de mai sus.
+void requireSupabase
 
 export interface User {
   id: string
