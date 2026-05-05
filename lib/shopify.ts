@@ -98,6 +98,8 @@ export async function searchOrderByOrderNumber(
       `#MX${cleanOrderNumber}`, // #MX12345
     ]
 
+    console.log(`[shopify] searchOrderByOrderNumber domain=${shopifyDomain} tokenPrefix=${accessToken.slice(0, 8)}... patterns=${searchPatterns.join(',')}`)
+
     for (const pattern of searchPatterns) {
       const response = await fetch(
         `https://${shopifyDomain}/admin/api/2026-04/orders.json?name=${pattern}&status=any`,
@@ -110,11 +112,14 @@ export async function searchOrderByOrderNumber(
       )
 
       if (!response.ok) {
-        continue // Încearcă următorul pattern
+        const errBody = await response.text().catch(() => '')
+        console.warn(`[shopify] orders.json pattern=${pattern} status=${response.status} body=${errBody.slice(0, 200)}`)
+        continue
       }
 
       const data = await response.json()
-      
+      console.log(`[shopify] orders.json pattern=${pattern} status=200 found=${data.orders?.length || 0}`)
+
       if (data.orders && data.orders.length > 0) {
         return {
           success: true,
