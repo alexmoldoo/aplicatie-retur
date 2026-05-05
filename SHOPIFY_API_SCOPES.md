@@ -31,9 +31,9 @@ Acest document explică exact ce accese API Shopify sunt necesare pentru aplica�
 
 **Endpoint-uri folosite:**
 ```
-GET /admin/api/2024-01/orders.json?name={orderNumber}&status=any
-GET /admin/api/2024-01/orders.json?phone={phone}&status=any&limit=250
-GET /admin/api/2024-01/orders.json?email={email}&status=any&limit=250
+GET /admin/api/2026-04/orders.json?name={orderNumber}&status=any
+GET /admin/api/2026-04/orders.json?phone={phone}&status=any&limit=250
+GET /admin/api/2026-04/orders.json?email={email}&status=any&limit=250
 ```
 
 ---
@@ -52,7 +52,7 @@ GET /admin/api/2024-01/orders.json?email={email}&status=any&limit=250
 
 **Endpoint-uri care vor fi folosite:**
 ```
-POST /admin/api/2024-01/orders/{order_id}/refunds.json
+POST /admin/api/2026-04/orders/{order_id}/refunds.json
 ```
 
 **NOTĂ:** Momentan aplicația NU creează retururi automat în Shopify. Acest acces va fi necesar când implementăm această funcționalitate.
@@ -135,5 +135,5 @@ A: Da! Aplicația funcționează perfect doar cu `read_orders`. `write_refunds` 
 
 - [Shopify Admin API Documentation](https://shopify.dev/api/admin-rest)
 - [Shopify API Scopes](https://shopify.dev/api/usage/access-scopes)
-- [Orders API Reference](https://shopify.dev/api/admin-rest/2024-01/resources/order)
+- [Orders API Reference](https://shopify.dev/api/admin-rest/2026-04/resources/order)
 
