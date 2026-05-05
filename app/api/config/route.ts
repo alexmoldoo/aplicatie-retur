@@ -23,7 +23,7 @@ export async function GET() {
 
     const config = await getConfig()
     
-    // Nu returnăm token-ul complet din motive de securitate
+    // Nu returnăm secretele complete din motive de securitate
     return NextResponse.json({
       success: true,
       config: {
@@ -31,6 +31,8 @@ export async function GET() {
           domain: config.shopify.domain,
           shopTitle: config.shopify.shopTitle,
           accessTokenConfigured: config.shopify.accessToken.length > 0,
+          clientIdConfigured: config.shopify.clientId.length > 0,
+          clientSecretConfigured: config.shopify.clientSecret.length > 0,
         },
         excludedSKUs: config.excludedSKUs,
       },
@@ -66,10 +68,12 @@ export async function POST(request: NextRequest) {
     const currentConfig = await getConfig()
 
     if (shopify) {
-      // Păstrează datele existente dacă nu sunt furnizate noi valori
+      // Păstrează valorile existente dacă nu sunt furnizate noi valori
       await updateShopifyConfig({
         domain: shopify.domain || currentConfig.shopify.domain || '',
         accessToken: shopify.accessToken || currentConfig.shopify.accessToken || '',
+        clientId: shopify.clientId || currentConfig.shopify.clientId || '',
+        clientSecret: shopify.clientSecret || currentConfig.shopify.clientSecret || '',
         shopTitle: shopify.shopTitle || currentConfig.shopify.shopTitle || '',
       })
     }

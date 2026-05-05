@@ -43,7 +43,7 @@ if (!supabase && !IS_VERCEL) {
     }
     if (!fs.existsSync(CONFIG_FILE)) {
       fs.writeFileSync(CONFIG_FILE, JSON.stringify({
-        shopify: { domain: '', accessToken: '', shopTitle: '' },
+        shopify: { domain: '', accessToken: '', clientId: '', clientSecret: '', shopTitle: '' },
         excludedSKUs: [],
       }, null, 2))
     }
@@ -79,7 +79,9 @@ export interface User {
 
 export interface ShopifyConfig {
   domain: string
-  accessToken: string
+  accessToken: string // legacy shpat_ token (custom apps clasice, deprecate 2026-01-01)
+  clientId: string // Dev Dashboard client_id (folosit pentru client_credentials_grant)
+  clientSecret: string // Dev Dashboard client_secret
   shopTitle: string
 }
 
@@ -344,16 +346,20 @@ export async function getConfig(): Promise<AppConfig> {
         shopify: {
           domain: '',
           accessToken: '',
+          clientId: '',
+          clientSecret: '',
           shopTitle: '',
         },
         excludedSKUs: [],
       }
     }
-    
+
     return {
       shopify: {
         domain: data.shopify_domain || '',
         accessToken: data.shopify_access_token || '',
+        clientId: data.shopify_client_id || '',
+        clientSecret: data.shopify_client_secret || '',
         shopTitle: data.shop_title || '',
       },
       excludedSKUs: (data.excluded_skus as string[]) || [],
@@ -363,12 +369,24 @@ export async function getConfig(): Promise<AppConfig> {
   // Fallback la JSON
   try {
     const data = fs.readFileSync(CONFIG_FILE, 'utf-8')
-    return JSON.parse(data)
+    const parsed = JSON.parse(data) as Partial<AppConfig>
+    return {
+      shopify: {
+        domain: parsed.shopify?.domain || '',
+        accessToken: parsed.shopify?.accessToken || '',
+        clientId: parsed.shopify?.clientId || '',
+        clientSecret: parsed.shopify?.clientSecret || '',
+        shopTitle: parsed.shopify?.shopTitle || '',
+      },
+      excludedSKUs: parsed.excludedSKUs || [],
+    }
   } catch (error) {
     return {
       shopify: {
         domain: '',
         accessToken: '',
+        clientId: '',
+        clientSecret: '',
         shopTitle: '',
       },
       excludedSKUs: [],
@@ -399,30 +417,32 @@ export async function updateShopifyConfig(shopify: ShopifyConfig): Promise<void>
       .single()
 
     if (existing) {
-      // Actualizează configurația existentă
       const { error } = await supabase
         .from('app_config')
         .update({
           shopify_domain: shopify.domain,
           shopify_access_token: shopify.accessToken,
+          shopify_client_id: shopify.clientId,
+          shopify_client_secret: shopify.clientSecret,
           shop_title: shopify.shopTitle,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)
-      
+
       if (error) {
         throw new Error('Eroare la actualizarea configurației: ' + error.message)
       }
     } else {
-      // Creează configurație nouă
       const { error } = await supabase
         .from('app_config')
         .insert({
           shopify_domain: shopify.domain,
           shopify_access_token: shopify.accessToken,
+          shopify_client_id: shopify.clientId,
+          shopify_client_secret: shopify.clientSecret,
           shop_title: shopify.shopTitle,
         })
-      
+
       if (error) {
         throw new Error('Eroare la crearea configurației: ' + error.message)
       }

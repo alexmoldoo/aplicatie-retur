@@ -13,10 +13,15 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [success, setSuccess] = useState<string | null>(null)
   
   const [shopifyDomain, setShopifyDomain] = useState('')
-  const [shopifyAccessToken, setShopifyAccessToken] = useState('')
+  const [shopifyClientId, setShopifyClientId] = useState('')
+  const [shopifyClientSecret, setShopifyClientSecret] = useState('')
+  const [shopifyAccessToken, setShopifyAccessToken] = useState('') // legacy shpat_
   const [shopTitle, setShopTitle] = useState('')
   const [isShopifyConnected, setIsShopifyConnected] = useState(false)
   const [showShopifyEdit, setShowShopifyEdit] = useState(false)
+  const [clientIdConfigured, setClientIdConfigured] = useState(false)
+  const [clientSecretConfigured, setClientSecretConfigured] = useState(false)
+  const [accessTokenConfigured, setAccessTokenConfigured] = useState(false)
   const [excludedSKUs, setExcludedSKUs] = useState<string[]>(['RMA-009', 'RMA-025'])
   const [newSKU, setNewSKU] = useState('')
 
@@ -164,11 +169,17 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         setShopifyDomain(data.config.shopify.domain || '')
         setShopTitle(data.config.shopify.shopTitle || '')
         setExcludedSKUs(data.config.excludedSKUs || ['RMA-009', 'RMA-025'])
-        
-        // Verifică dacă Shopify este conectat
-        const connected = data.config.shopify.accessTokenConfigured && 
-                         data.config.shopify.domain && 
-                         data.config.shopify.shopTitle
+
+        const cidOk = !!data.config.shopify.clientIdConfigured
+        const csOk = !!data.config.shopify.clientSecretConfigured
+        const tokOk = !!data.config.shopify.accessTokenConfigured
+        setClientIdConfigured(cidOk)
+        setClientSecretConfigured(csOk)
+        setAccessTokenConfigured(tokOk)
+
+        // E conectat dacă are domeniu + (client_id+secret SAU access token legacy)
+        const hasCreds = (cidOk && csOk) || tokOk
+        const connected = hasCreds && data.config.shopify.domain && data.config.shopify.shopTitle
         setIsShopifyConnected(connected)
       }
     } catch (error) {
@@ -255,9 +266,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     setSuccess(null)
     setSaving(true)
 
-    // Validare
-    if (!shopTitle || !shopifyDomain || !shopifyAccessToken) {
-      setError('Toate câmpurile Shopify sunt obligatorii')
+    // Validare: domain + shop title obligatorii.
+    // Credențiale: fie Client ID + Secret (Dev Dashboard), fie Access Token legacy.
+    if (!shopTitle || !shopifyDomain) {
+      setError('Domain Shopify și Titlu magazin sunt obligatorii')
+      setSaving(false)
+      return
+    }
+
+    const hasNewCreds = shopifyClientId && shopifyClientSecret
+    const hasLegacy = shopifyAccessToken
+    const alreadyConfigured = (clientIdConfigured && clientSecretConfigured) || accessTokenConfigured
+
+    if (!hasNewCreds && !hasLegacy && !alreadyConfigured) {
+      setError('Completează Client ID + Client Secret (sau Access Token legacy)')
       setSaving(false)
       return
     }
@@ -269,6 +291,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         body: JSON.stringify({
           shopify: {
             domain: shopifyDomain,
+            clientId: shopifyClientId, // gol = păstrează vechiul
+            clientSecret: shopifyClientSecret,
             accessToken: shopifyAccessToken,
             shopTitle: shopTitle,
           },
@@ -281,7 +305,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         setSuccess('Configurație Shopify salvată cu succes!')
         setIsShopifyConnected(true)
         setShowShopifyEdit(false)
-        setShopifyAccessToken('') // Șterge token-ul din formular pentru securitate
+        setShopifyClientId('')
+        setShopifyClientSecret('')
+        setShopifyAccessToken('')
+        // Reîncarcă să primim flag-urile noi
+        loadConfig()
         setTimeout(() => setSuccess(null), 3000)
       } else {
         setError(data.message || 'Eroare la salvarea configurației')
@@ -600,21 +628,29 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </p>
             </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{
-                display: 'block',
-                fontWeight: 'bold',
-                marginBottom: '8px',
-                fontSize: '14px'
-              }}>
-                Access Token Shopify *
+            <div style={{
+              marginBottom: '16px',
+              padding: '12px',
+              background: '#f0f7ff',
+              border: '1px solid #c5dfff',
+              borderRadius: '8px',
+              fontSize: '13px',
+              color: '#1f4e8a',
+            }}>
+              <strong>Dev Dashboard (recomandat, 2026+):</strong> creezi app la
+              dev.shopify.com → Settings → copiezi <em>Client ID</em> și <em>Client secret</em>.
+              Aplicația schimbă automat aceste credențiale pe un access token de 24h.
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', fontSize: '14px' }}>
+                Client ID Shopify {clientIdConfigured && <span style={{ color: '#4CAF50', fontWeight: 'normal' }}>· configurat ✓</span>}
               </label>
               <input
-                type="password"
-                value={shopifyAccessToken}
-                onChange={(e) => setShopifyAccessToken(e.target.value)}
-                placeholder={isShopifyConnected ? 'Lăsați gol pentru a păstra token-ul existent' : 'shpat_xxxxxxxxxxxxxxxx'}
-                required={!isShopifyConnected}
+                type="text"
+                value={shopifyClientId}
+                onChange={(e) => setShopifyClientId(e.target.value)}
+                placeholder={clientIdConfigured ? 'Lasă gol ca să păstrezi valoarea existentă' : 'ex: 1a2b3c4d5e6f...'}
                 style={{
                   width: '100%',
                   padding: '12px 16px',
@@ -622,15 +658,60 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   border: '1px solid #e0e0e0',
                   fontSize: '14px',
                   outline: 'none',
-                  fontFamily: 'monospace'
+                  fontFamily: 'monospace',
                 }}
               />
-              <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                {isShopifyConnected 
-                  ? 'Lăsați gol pentru a păstra token-ul existent sau introduceți unul nou pentru a-l înlocui'
-                  : 'Introdu token-ul pentru prima configurare'}
-              </p>
             </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', fontSize: '14px' }}>
+                Client Secret Shopify {clientSecretConfigured && <span style={{ color: '#4CAF50', fontWeight: 'normal' }}>· configurat ✓</span>}
+              </label>
+              <input
+                type="password"
+                value={shopifyClientSecret}
+                onChange={(e) => setShopifyClientSecret(e.target.value)}
+                placeholder={clientSecretConfigured ? 'Lasă gol ca să păstrezi valoarea existentă' : 'Client secret din Dev Dashboard'}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #e0e0e0',
+                  fontSize: '14px',
+                  outline: 'none',
+                  fontFamily: 'monospace',
+                }}
+              />
+            </div>
+
+            <details style={{ marginBottom: '24px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '13px', color: '#666' }}>
+                Folosesc un Access Token legacy (shpat_…)
+              </summary>
+              <div style={{ marginTop: '12px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', fontSize: '14px' }}>
+                  Access Token (legacy) {accessTokenConfigured && <span style={{ color: '#4CAF50', fontWeight: 'normal' }}>· configurat ✓</span>}
+                </label>
+                <input
+                  type="password"
+                  value={shopifyAccessToken}
+                  onChange={(e) => setShopifyAccessToken(e.target.value)}
+                  placeholder={accessTokenConfigured ? 'Lasă gol ca să păstrezi token-ul existent' : 'shpat_xxxxxxxxxxxxxxxx'}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0',
+                    fontSize: '14px',
+                    outline: 'none',
+                    fontFamily: 'monospace',
+                  }}
+                />
+                <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                  Numai pentru custom apps clasice (deprecate din 2026-01-01). Nu completa dacă folosești Client ID/Secret.
+                </p>
+              </div>
+            </details>
 
             <div style={{
               display: 'flex',

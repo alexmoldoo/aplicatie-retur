@@ -178,8 +178,8 @@ export async function POST(request: NextRequest) {
 
     const shopifyDomain = config.shopify.domain || process.env.SHOPIFY_DOMAIN
     const legacyToken = config.shopify.accessToken || process.env.SHOPIFY_ACCESS_TOKEN
-    const clientId = process.env.SHOPIFY_CLIENT_ID
-    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+    const clientId = config.shopify.clientId || process.env.SHOPIFY_CLIENT_ID
+    const clientSecret = config.shopify.clientSecret || process.env.SHOPIFY_CLIENT_SECRET
 
     if (!shopifyDomain) {
       return NextResponse.json(
