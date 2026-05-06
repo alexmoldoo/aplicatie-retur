@@ -10,18 +10,24 @@
  */
 export function normalizeName(name: string): string {
   if (!name) return ''
-  
-  // Convert la lowercase
+
   let normalized = name.toLowerCase().trim()
-  
+
   // Elimină diacritice
   normalized = normalized
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-  
-  // Elimină spații duble și normalizează spațiile
+
+  // Cratime, apostrofuri, virgule, puncte → spațiu
+  // („Maria-Elena", „D'Angelo", „Lungu, Dana" → tokeni separați)
+  normalized = normalized.replace(/[-_,.'`’]/g, ' ')
+
+  // Elimină orice alt caracter non-literă (cifre, simboluri exotice)
+  normalized = normalized.replace(/[^a-z\s]/g, ' ')
+
+  // Spații multiple → unul singur
   normalized = normalized.replace(/\s+/g, ' ').trim()
-  
+
   return normalized
 }
 
@@ -52,79 +58,77 @@ export function extractNameParts(fullName: string): {
 }
 
 /**
- * Verifică dacă numele introdus se potrivește cu numele din comandă
- * Validare STRICTĂ:
- * - Numele de familie introdus trebuie să se regăsească EXACT în numele din comandă SAU
- * - Prenumele introdus trebuie să se regăsească EXACT în numele din comandă
- * - Nu acceptă potriviri parțiale sau fuzzy
+ * Verifică dacă numele introdus se potrivește cu numele din comandă.
+ *
+ * Matching ORDER-INDEPENDENT pe seturi de tokeni — în RO oamenii scriu
+ * deopotrivă „Lungu Dana" (familie-prenume) și „Dana Lungu" (prenume-familie),
+ * iar Shopify stochează `first_name + last_name`. Comparăm seturi, nu ordine.
+ *
+ * Reguli:
+ * - tokeni de minim 2 caractere, normalizați (lowercase + fără diacritice)
+ * - dacă unul e subset al celuilalt → match (ex: „Andrei" ⊆ „Moldovan Andrei",
+ *   „Lungu Dana Andra" ⊇ „Lungu Dana")
+ * - dacă au cel puțin 2 tokeni în comun → match (acoperă „Lungu Dana" vs
+ *   „Dana Lungu Andra")
+ * - dacă unul are un singur token (≥3 caractere) prezent în celălalt → match
  */
 export function matchNames(introducedName: string, orderName: string): boolean {
   if (!introducedName || !orderName) {
     return false
   }
-  
+
   const normalizedIntroduced = normalizeName(introducedName)
   const normalizedOrder = normalizeName(orderName)
-  
-  // Dacă numele sunt identice după normalizare
+
   if (normalizedIntroduced === normalizedOrder) {
     return true
   }
-  
-  // Extrage părțile din ambele nume
-  const introducedParts = extractNameParts(introducedName)
-  const orderParts = extractNameParts(orderName)
-  
-  // Dacă nu are părți, nu se potrivește
-  if (introducedParts.parts.length === 0 || orderParts.parts.length === 0) {
+
+  const introTokens = normalizedIntroduced.split(' ').filter(t => t.length >= 2)
+  const orderTokens = normalizedOrder.split(' ').filter(t => t.length >= 2)
+
+  if (introTokens.length === 0 || orderTokens.length === 0) {
     return false
   }
-  
-  // Verificare STRICTĂ: Numele de familie trebuie să se potrivească
-  // Numele de familie este primul cuvânt în ambele cazuri
-  const introducedNumeFamilie = introducedParts.parts[0]
-  const orderNumeFamilie = orderParts.parts[0]
-  
-  if (introducedNumeFamilie === orderNumeFamilie) {
-    // Numele de familie se potrivește - verifică dacă există și prenumele
-    // Dacă numele introdus are doar nume de familie, acceptă
-    if (introducedParts.parts.length === 1) {
-      return true
-    }
-    
-    // Dacă ambele au prenume, verifică dacă cel puțin un prenume se potrivește
-    if (introducedParts.parts.length > 1 && orderParts.parts.length > 1) {
-      const introducedPrenume = introducedParts.parts.slice(1)
-      const orderPrenume = orderParts.parts.slice(1)
-      
-      // Verifică dacă cel puțin un prenume din introdus se regăsește în comenză
-      for (const prenumeIntrodus of introducedPrenume) {
-        if (prenumeIntrodus.length >= 3) { // Minim 3 caractere pentru prenume
-          for (const prenumeComanda of orderPrenume) {
-            if (prenumeIntrodus === prenumeComanda) {
-              return true
-            }
-          }
-        }
-      }
-    }
-    
-    // Dacă numele de familie se potrivește dar nu s-a verificat prenumele, acceptă
+
+  const introSet = new Set(introTokens)
+  const orderSet = new Set(orderTokens)
+
+  // Subset în orice direcție
+  const introSubsetOfOrder = introTokens.every(t => orderSet.has(t))
+  const orderSubsetOfIntro = orderTokens.every(t => introSet.has(t))
+  if (introSubsetOfOrder || orderSubsetOfIntro) {
     return true
   }
-  
-  // Verificare alternativă: poate prenumele introdus este numele de familie din comandă
-  // (caz: "Andrei" introdus, dar în comandă este "Moldovan Andrei")
-  if (introducedParts.parts.length === 1 && introducedParts.parts[0].length >= 3) {
-    // Verifică dacă numele introdus se regăsește ca prenume în comandă
-    const introducedSingle = introducedParts.parts[0]
-    for (let i = 1; i < orderParts.parts.length; i++) {
-      if (introducedSingle === orderParts.parts[i]) {
-        return true
-      }
-    }
+
+  // Calculează intersecția
+  const commonTokens: string[] = []
+  Array.from(introSet).forEach(t => {
+    if (orderSet.has(t)) commonTokens.push(t)
+  })
+
+  // ≥2 tokeni în comun → match (acoperă „Dana Pop" vs „Pop Dana Andra")
+  if (commonTokens.length >= 2) {
+    return true
   }
-  
+
+  // 1 token comun, dar de cel puțin 4 caractere → match
+  // (acoperă cazul „Lungu Adriana" introdus când comanda e a lui „Dana Lungu",
+  // dar numai dacă tokenul comun e suficient de specific — un nume de familie
+  // realist, nu doar particule scurte ca „de", „la", „al".)
+  if (commonTokens.length === 1 && commonTokens[0].length >= 4) {
+    return true
+  }
+
+  // Caz edge: un singur token introdus, ≥3 caractere, prezent în comandă
+  // (ex: „Andrei" introdus, comanda e „Moldovan Andrei")
+  if (introTokens.length === 1 && introTokens[0].length >= 3 && orderSet.has(introTokens[0])) {
+    return true
+  }
+  if (orderTokens.length === 1 && orderTokens[0].length >= 3 && introSet.has(orderTokens[0])) {
+    return true
+  }
+
   return false
 }
 

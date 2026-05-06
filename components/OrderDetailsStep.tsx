@@ -229,11 +229,11 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
           )}
         </div>
 
-        {/* Nume & Prenume */}
+        {/* Nume complet */}
         <div className="os-field">
           <label className="os-label" htmlFor="os-nume">
             <span className="os-label-icon" aria-hidden="true">👤</span>
-            Nume & Prenume
+            Nume complet
             {!(email && !numarComanda && !telefon) && <span className="os-required">*</span>}
           </label>
           <div className={`os-input-wrap ${validationErrors.nume ? 'os-error-state' : ''} ${nume && !validationErrors.nume ? 'os-valid-state' : ''}`}>
@@ -262,7 +262,7 @@ export default function OrderDetailsStep({ onSubmit, onOrderSelected }: OrderDet
           {validationErrors.nume ? (
             <p className="os-hint os-hint-error">{validationErrors.nume}</p>
           ) : (
-            <p className="os-hint">Așa cum apare pe comandă</p>
+            <p className="os-hint">Numele tău, în orice ordine (ex: „Dana Lungu" sau „Lungu Dana")</p>
           )}
         </div>
 

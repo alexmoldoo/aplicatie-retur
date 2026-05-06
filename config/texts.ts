@@ -16,8 +16,8 @@ export const appTexts = {
     title: 'Detalii comandă',
     fields: {
       nume: {
-        label: 'Nume & Prenume',
-        placeholder: 'Introdu numele complete de pe comandă',
+        label: 'Nume complet',
+        placeholder: 'Introdu numele tău complet',
       },
       numarComanda: {
         label: 'Număr comandă',

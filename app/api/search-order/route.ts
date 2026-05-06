@@ -19,8 +19,9 @@ const HUMAN_MIN_FILL_TIME_MS = 1500 // sub atât → suspect bot
 
 export const dynamic = 'force-dynamic'
 
-// Rate limit: max 4 căutări / 5 minute / IP
-const checkRateLimit = makeRateLimiter({ max: 4, windowMs: 5 * 60_000 })
+// Rate limit: max 8 căutări / 5 minute / IP (oamenii fac mai multe încercări
+// legitime: tastează greșit numărul, scriu numele în alt format etc.)
+const checkRateLimit = makeRateLimiter({ max: 8, windowMs: 5 * 60_000 })
 
 // Cache rezultate: 60 secunde / același input
 const CACHE_TTL_MS = 60_000
