@@ -249,20 +249,39 @@ export async function getAWBStatus(awbNumber: string): Promise<SameDayAWBStatus 
     transitLocation: e.transitLocation ?? e.transit_location ?? e.location,
   }))
 
-  return {
-    awbNumber: String(data.awbNumber ?? awbNumber),
-    expeditionStatusId:
-      typeof data.expeditionStatusId === 'number'
+  // SameDay împachetează statusul curent într-un obiect `expeditionStatus`
+  // ({statusId, status, statusLabel, ...}). Variantele istorice puteau să-l
+  // pună la rădăcină ca string sau ca `data.statusId/status` separat — păstrăm
+  // toate fallback-urile.
+  const statusObj =
+    data.expeditionStatus && typeof data.expeditionStatus === 'object'
+      ? data.expeditionStatus
+      : null
+
+  const expeditionStatusId: number | null =
+    typeof statusObj?.statusId === 'number'
+      ? statusObj.statusId
+      : typeof data.expeditionStatusId === 'number'
         ? data.expeditionStatusId
         : typeof data.statusId === 'number'
           ? data.statusId
-          : null,
-    expeditionStatus:
-      typeof data.expeditionStatus === 'string'
+          : null
+
+  const expeditionStatus: string | null =
+    typeof statusObj?.status === 'string'
+      ? statusObj.status
+      : typeof data.expeditionStatus === 'string'
         ? data.expeditionStatus
         : typeof data.status === 'string'
           ? data.status
-          : null,
+          : null
+
+  const summaryAwb = data?.expeditionSummary?.awbNumber
+
+  return {
+    awbNumber: String(data.awbNumber ?? summaryAwb ?? awbNumber),
+    expeditionStatusId,
+    expeditionStatus,
     history,
   }
 }
