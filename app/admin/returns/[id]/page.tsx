@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { RETURN_STATUS_LABEL, RETURN_STATUS_LIST, normalizeStatus, type ReturnStatus } from '@/lib/return-status'
+import { RETURN_STATUS_LABEL, RETURN_STATUS_LIST, TERMINAL_STATUSES, normalizeStatus, type ReturnStatus } from '@/lib/return-status'
 
 interface ReturnData {
   idRetur: string
@@ -125,6 +125,17 @@ export default function ReturnDetailsPage() {
   useEffect(() => {
     loadReturnDetails()
   }, [params.id])
+
+  // Auto-cere tracking-ul SameDay la deschiderea returului. Endpointul aplică
+  // și statusul nou dacă curierul a avansat. Nu rulăm pe statusuri terminale
+  // sau pe PRIMIT (operatorul a confirmat manual; tracking-ul nu mai contează).
+  useEffect(() => {
+    if (!returnData?.awbNumber) return
+    if (TERMINAL_STATUSES.has(returnData.status) || returnData.status === 'PRIMIT') return
+    if (tracking?.awbNumber === returnData.awbNumber) return
+    refreshTracking()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnData?.awbNumber, returnData?.status])
 
   const loadReturnDetails = async () => {
     try {

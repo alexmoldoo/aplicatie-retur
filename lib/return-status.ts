@@ -123,23 +123,24 @@ export function sameDayStatusToInternal(input: {
   expeditionStatusId: number | null
   expeditionStatus: string | null
 }): ReturnStatus | null {
-  // ID numeric: praguri conform fluxului SameDay observat.
-  // Codurile uzuale: 1=AWB issued, 2=Picked up, 3=In sortation, 4=In transit/delivery, 5+=Delivered.
-  if (typeof input.expeditionStatusId === 'number') {
-    const id = input.expeditionStatusId
-    if (id >= 5) return RETURN_STATUS.LIVRAT
-    if (id >= 3) return RETURN_STATUS.IN_TRANZIT
-    if (id >= 2) return RETURN_STATUS.PRELUAT_CURIER
-    // id == 1 (AWB issued, niciun eveniment) → fără mapare; lăsăm INITIAT
-    if (id === 1) return null
+  // SameDay: ID-urile NU sunt ordinale (1=AWB Emis, 4=Ridicat, 23=Alocat
+  // pentru ridicare, 26=Depozitare etc). Praguri pe ID dau false positive.
+  // Folosim text-first cu regex bilingv (RO/EN) și ID exact ca fallback.
+  const text = (input.expeditionStatus || '').toLowerCase().trim()
+  if (text) {
+    if (/livrat|delivered/.test(text)) return RETURN_STATUS.LIVRAT
+    if (/depozit|tranzit|transit|sortar|sortation|delivery|drum|out\s+for/.test(text)) return RETURN_STATUS.IN_TRANZIT
+    if (/preluat|pickup|picked|ridicat|alocat/.test(text)) return RETURN_STATUS.PRELUAT_CURIER
+    if (/awb.*emis|issued/.test(text)) return null
   }
 
-  // Fallback pe text (RO + EN), dacă ID-ul lipsește sau e neașteptat.
-  const text = (input.expeditionStatus || '').toLowerCase().trim()
-  if (!text) return null
-  if (/livrat|delivered/.test(text)) return RETURN_STATUS.LIVRAT
-  if (/tranzit|transit|sortar|sortation|delivery|drum/.test(text)) return RETURN_STATUS.IN_TRANZIT
-  if (/preluat|pickup|picked|ridicat/.test(text)) return RETURN_STATUS.PRELUAT_CURIER
+  // Fallback pe ID-uri cunoscute (din observații live SameDay).
+  if (typeof input.expeditionStatusId === 'number') {
+    const id = input.expeditionStatusId
+    if (id === 1) return null               // AWB Emis
+    if (id === 4 || id === 23) return RETURN_STATUS.PRELUAT_CURIER  // Ridicat / Alocat ridicare
+    if (id === 26) return RETURN_STATUS.IN_TRANZIT  // Depozitare
+  }
 
   return null
 }
