@@ -3,8 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { getLedColor } from '@/lib/eligibility'
-
-type ReturnStatus = 'INITIAT' | 'IN_ASTEPTARE_COLET' | 'COLET_PRIMIT' | 'PROCESAT' | 'FINALIZAT' | 'ANULAT'
+import { RETURN_STATUS_LABEL as STATUS_LABEL_MAP, normalizeStatus, type ReturnStatus } from '@/lib/return-status'
 
 interface ExistingReturnInfo {
   idRetur: string
@@ -44,16 +43,12 @@ interface Order {
 }
 
 const RETURN_STATUS_LABEL: Record<ReturnStatus, string> = {
-  INITIAT: 'Inițiat',
-  IN_ASTEPTARE_COLET: 'În așteptarea coletului',
-  COLET_PRIMIT: 'Colet primit',
-  PROCESAT: 'În procesare',
+  ...STATUS_LABEL_MAP,
   FINALIZAT: 'Finalizat (rambursat)',
-  ANULAT: 'Anulat',
 }
 
 function isCancellableStatus(status: ReturnStatus): boolean {
-  return status === 'INITIAT' || status === 'IN_ASTEPTARE_COLET'
+  return status === 'INITIAT'
 }
 
 /** Self-cancel permis doar fără AWB (metoda „manual"). Cu AWB → cerere admin prin email. */
@@ -64,10 +59,11 @@ function canSelfCancel(er: ExistingReturnInfo): boolean {
 function returnStatusColor(status: ReturnStatus): { bg: string; fg: string; border: string } {
   switch (status) {
     case 'INITIAT':
-    case 'IN_ASTEPTARE_COLET':
       return { bg: '#fef3c7', fg: '#92400e', border: '#fcd34d' }
-    case 'COLET_PRIMIT':
-    case 'PROCESAT':
+    case 'PRELUAT_CURIER':
+    case 'IN_TRANZIT':
+    case 'LIVRAT':
+    case 'PRIMIT':
       return { bg: '#dbeafe', fg: '#1e40af', border: '#93c5fd' }
     case 'FINALIZAT':
       return { bg: '#dcfce7', fg: '#166534', border: '#86efac' }
@@ -315,8 +311,10 @@ export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderS
                   <div className="os-sel-er-msg">
                     {er.status === 'FINALIZAT' ? (
                       <>✅ Returul a fost finalizat și suma a fost rambursată.</>
-                    ) : er.status === 'PROCESAT' || er.status === 'COLET_PRIMIT' ? (
-                      <>📦 Coletul a fost primit la noi și e în procesare.</>
+                    ) : er.status === 'LIVRAT' || er.status === 'PRIMIT' ? (
+                      <>📦 Coletul a fost livrat la noi și e în procesare.</>
+                    ) : er.status === 'PRELUAT_CURIER' || er.status === 'IN_TRANZIT' ? (
+                      <>🚚 Coletul este în drum către noi.</>
                     ) : (
                       <>⏳ Returul este înregistrat. Așteptăm coletul tău.</>
                     )}

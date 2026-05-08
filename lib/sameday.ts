@@ -200,3 +200,69 @@ export async function createReturnAWB(params: CreateAWBParams): Promise<AWBResul
     cost: typeof data.cost === 'number' ? data.cost : 19.99,
   }
 }
+
+export interface SameDayHistoryEvent {
+  statusId: number
+  status: string
+  statusDate: string
+  transitLocation?: string
+}
+
+export interface SameDayAWBStatus {
+  awbNumber: string
+  expeditionStatusId: number | null
+  expeditionStatus: string | null
+  history: SameDayHistoryEvent[]
+}
+
+/**
+ * Tracking AWB curent.
+ * GET /api/client/awb/{awbNumber}/status
+ *
+ * Răspuns așteptat (relevant): expeditionStatus(Id), expeditionHistory[].
+ * Codurile statusId variază — folosim ID-ul când îl avem și fallback pe text.
+ * 404 înseamnă AWB necunoscut la curier (poate fi încă neînregistrat) → null.
+ */
+export async function getAWBStatus(awbNumber: string): Promise<SameDayAWBStatus | null> {
+  if (!awbNumber) return null
+  const token = await authenticate()
+  const res = await fetch(
+    `${SAMEDAY_BASE_URL}/api/client/awb/${encodeURIComponent(awbNumber)}/status`,
+    { headers: { 'X-AUTH-TOKEN': token } }
+  )
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new Error(`SameDay getAWBStatus failed: ${res.status} ${res.statusText}`)
+  }
+  const data = await res.json().catch(() => ({} as any))
+
+  const rawHistory: any[] = Array.isArray(data.expeditionHistory)
+    ? data.expeditionHistory
+    : Array.isArray(data.history)
+      ? data.history
+      : []
+
+  const history: SameDayHistoryEvent[] = rawHistory.map((e: any) => ({
+    statusId: Number(e.statusId ?? e.status_id ?? e.expeditionStatusId ?? 0),
+    status: String(e.status ?? e.statusName ?? e.expeditionStatus ?? ''),
+    statusDate: String(e.statusDate ?? e.status_date ?? e.date ?? ''),
+    transitLocation: e.transitLocation ?? e.transit_location ?? e.location,
+  }))
+
+  return {
+    awbNumber: String(data.awbNumber ?? awbNumber),
+    expeditionStatusId:
+      typeof data.expeditionStatusId === 'number'
+        ? data.expeditionStatusId
+        : typeof data.statusId === 'number'
+          ? data.statusId
+          : null,
+    expeditionStatus:
+      typeof data.expeditionStatus === 'string'
+        ? data.expeditionStatus
+        : typeof data.status === 'string'
+          ? data.status
+          : null,
+    history,
+  }
+}

@@ -21,6 +21,9 @@ export type AuditAction =
   | 'return_cancel_denied'
   | 'admin_login_success'
   | 'admin_login_fail'
+  | 'admin_status_change'
+  | 'auto_status_change'
+  | 'auto_status_refresh_run'
   | 'register_bootstrap'
   | 'register_denied'
 

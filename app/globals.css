@@ -1,12 +1,15 @@
+@import './styles/tokens.css';
+
+/* Aliasuri compat. cu codul existent — toate noile componente folosesc tokens.css */
 :root {
-  --bg-primary: #fff;
-  --bg-secondary: #f5f5f5;
-  --bg-tertiary: #fafafa;
-  --text-primary: #333;
-  --text-secondary: #666;
-  --border-color: #e0e0e0;
-  --input-bg: #fff;
-  --input-border: #e0e0e0;
+  --bg-primary: var(--color-bg);
+  --bg-secondary: var(--color-bg-alt);
+  --bg-tertiary: var(--color-bg-muted);
+  --text-primary: var(--color-text);
+  --text-secondary: var(--color-text-muted);
+  --border-color: var(--color-border);
+  --input-bg: var(--color-bg);
+  --input-border: var(--color-border);
 }
 
 * {
@@ -40,6 +43,24 @@ body {
 #__next {
   width: 100%;
   max-width: 1200px;
+}
+
+/* Pagini admin: full-bleed, fără centrare */
+body:has([data-admin-shell]) {
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--color-bg-alt);
+}
+
+body:has([data-admin-shell]) #__next {
+  width: 100%;
+  max-width: 100%;
+}
+
+body:has([data-admin-shell]) main {
+  width: 100%;
+  max-width: 100%;
 }
 
 /* Responsive pentru telefon (până la 480px) */
