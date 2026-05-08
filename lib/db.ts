@@ -8,6 +8,8 @@ import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import type { ReturnStatus } from './return-status'
+import { normalizeStatus } from './return-status'
 
 const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
 const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
@@ -129,7 +131,7 @@ export interface Return {
   refundData: RefundData // Date rambursare (IBAN și nume titular)
   signature: string // Semnătura clientului (data URL)
   totalRefund: number // Suma totală de returnat
-  status: 'INITIAT' | 'IN_ASTEPTARE_COLET' | 'COLET_PRIMIT' | 'PROCESAT' | 'FINALIZAT' | 'ANULAT' // Status retur
+  status: ReturnStatus // Status retur (vezi lib/return-status.ts)
   createdAt: string // Data creării cererii
   pdfPath: string // Calea către PDF-ul generat
   qrCodeData: string // QR code cu link către pagina de detalii (data URL)
@@ -520,7 +522,7 @@ export async function getReturns(): Promise<Return[]> {
       refundData: row.refund_data,
       signature: row.signature,
       totalRefund: parseFloat(row.total_refund),
-      status: row.status,
+      status: normalizeStatus(row.status),
       createdAt: row.created_at,
       pdfPath: row.pdf_path || '',
       qrCodeData: row.qr_code_data || '',
@@ -533,7 +535,8 @@ export async function getReturns(): Promise<Return[]> {
   // Fallback la JSON
   try {
     const data = fs.readFileSync(RETURNS_FILE, 'utf-8')
-    return JSON.parse(data)
+    const parsed: Return[] = JSON.parse(data)
+    return parsed.map(r => ({ ...r, status: normalizeStatus(r.status) }))
   } catch (error) {
     return []
   }
@@ -636,7 +639,7 @@ export async function createReturn(
       refundData: data.refund_data,
       signature: data.signature,
       totalRefund: parseFloat(data.total_refund),
-      status: data.status,
+      status: normalizeStatus(data.status),
       createdAt: data.created_at,
       pdfPath: data.pdf_path || '',
       qrCodeData: data.qr_code_data || '',
@@ -690,7 +693,7 @@ export async function findReturnById(idRetur: string): Promise<Return | null> {
       refundData: data.refund_data,
       signature: data.signature,
       totalRefund: parseFloat(data.total_refund),
-      status: data.status,
+      status: normalizeStatus(data.status),
       createdAt: data.created_at,
       pdfPath: data.pdf_path || '',
       qrCodeData: data.qr_code_data || '',
@@ -735,7 +738,7 @@ export async function findReturnByOrderNumber(
       refundData: row.refund_data,
       signature: row.signature,
       totalRefund: parseFloat(row.total_refund),
-      status: row.status,
+      status: normalizeStatus(row.status),
       createdAt: row.created_at,
       pdfPath: row.pdf_path || '',
       qrCodeData: row.qr_code_data || '',
@@ -775,7 +778,7 @@ export async function updateReturnStatus(idRetur: string, status: Return['status
       refundData: data.refund_data,
       signature: data.signature,
       totalRefund: parseFloat(data.total_refund),
-      status: data.status,
+      status: normalizeStatus(data.status),
       createdAt: data.created_at,
       pdfPath: data.pdf_path || '',
       qrCodeData: data.qr_code_data || '',
@@ -876,7 +879,7 @@ export async function updateReturnDocuments(
       refundData: data.refund_data,
       signature: data.signature,
       totalRefund: parseFloat(data.total_refund),
-      status: data.status,
+      status: normalizeStatus(data.status),
       createdAt: data.created_at,
       pdfPath: data.pdf_path || '',
       qrCodeData: data.qr_code_data || '',
@@ -954,7 +957,7 @@ export async function updateReturn(
       refundData: data.refund_data,
       signature: data.signature,
       totalRefund: parseFloat(data.total_refund),
-      status: data.status,
+      status: normalizeStatus(data.status),
       createdAt: data.created_at,
       pdfPath: data.pdf_path || '',
       qrCodeData: data.qr_code_data || '',

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { RETURN_STATUS_LABEL, RETURN_STATUS_LIST, normalizeStatus, type ReturnStatus } from '@/lib/return-status'
 
 interface ReturnData {
   idRetur: string
@@ -23,7 +24,7 @@ interface ReturnData {
   }
   signature: string
   totalRefund: number
-  status: 'INITIAT' | 'IN_ASTEPTARE_COLET' | 'COLET_PRIMIT' | 'PROCESAT' | 'FINALIZAT' | 'ANULAT'
+  status: ReturnStatus
   createdAt: string
   pdfPath: string
   qrCodeData: string
@@ -41,6 +42,85 @@ export default function ReturnDetailsPage() {
   const [isEditMode, setIsEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editedData, setEditedData] = useState<ReturnData | null>(null)
+
+  const [statusSubmitting, setStatusSubmitting] = useState(false)
+  const [statusError, setStatusError] = useState<string | null>(null)
+
+  interface TrackingEvent {
+    statusId: number
+    status: string
+    statusDate: string
+    transitLocation?: string
+  }
+  interface TrackingData {
+    awbNumber: string | null
+    expeditionStatus: string | null
+    expeditionStatusId: number | null
+    history: TrackingEvent[]
+    appliedStatus: string | null
+  }
+  const [tracking, setTracking] = useState<TrackingData | null>(null)
+  const [trackingLoading, setTrackingLoading] = useState(false)
+  const [trackingError, setTrackingError] = useState<string | null>(null)
+  const [trackingMsg, setTrackingMsg] = useState<string | null>(null)
+
+  const refreshTracking = async () => {
+    if (!returnData?.awbNumber) return
+    setTrackingLoading(true)
+    setTrackingError(null)
+    setTrackingMsg(null)
+    try {
+      const r = await fetch(`/api/admin/returns/${params.id}/tracking`, { cache: 'no-store' })
+      const data = await r.json()
+      if (!r.ok || !data.success) {
+        setTrackingError(data?.message || 'Eroare la verificarea tracking-ului.')
+        return
+      }
+      setTracking({
+        awbNumber: data.awbNumber,
+        expeditionStatus: data.expeditionStatus,
+        expeditionStatusId: data.expeditionStatusId,
+        history: data.history || [],
+        appliedStatus: data.appliedStatus || null,
+      })
+      if (data.appliedStatus) {
+        setTrackingMsg(`Status actualizat automat la „${RETURN_STATUS_LABEL[data.appliedStatus as ReturnStatus] || data.appliedStatus}".`)
+        await loadReturnDetails()
+      }
+    } catch {
+      setTrackingError('Eroare la conectare.')
+    } finally {
+      setTrackingLoading(false)
+    }
+  }
+
+  const handleStatusSelect = async (next: ReturnStatus) => {
+    if (!returnData || next === returnData.status || statusSubmitting) return
+    const ok = window.confirm(
+      `Schimbi statusul din „${RETURN_STATUS_LABEL[returnData.status]}" în „${RETURN_STATUS_LABEL[next]}"?`
+    )
+    if (!ok) return
+    setStatusSubmitting(true)
+    setStatusError(null)
+    try {
+      const r = await fetch(`/api/returns/${params.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      })
+      const data = await r.json()
+      if (!r.ok || !data.success) {
+        setStatusError(data?.message || 'Eroare la schimbarea statusului.')
+        return
+      }
+      setReturnData(data.return)
+      setEditedData(data.return)
+    } catch {
+      setStatusError('Eroare la conectare.')
+    } finally {
+      setStatusSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     loadReturnDetails()
@@ -174,28 +254,19 @@ export default function ReturnDetailsPage() {
   }
 
   const getStatusColor = (status: string) => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case 'INITIAT': return '#2196F3'
-      case 'IN_ASTEPTARE_COLET': return '#FF9800'
-      case 'COLET_PRIMIT': return '#9C27B0'
-      case 'PROCESAT': return '#00BCD4'
+      case 'PRELUAT_CURIER': return '#FF9800'
+      case 'IN_TRANZIT': return '#FB8C00'
+      case 'LIVRAT': return '#9C27B0'
+      case 'PRIMIT': return '#00BCD4'
       case 'FINALIZAT': return '#4CAF50'
       case 'ANULAT': return '#f44336'
       default: return '#666'
     }
   }
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'INITIAT': return 'Inițiat'
-      case 'IN_ASTEPTARE_COLET': return 'În așteptarea coletului'
-      case 'COLET_PRIMIT': return 'Colet primit'
-      case 'PROCESAT': return 'Procesat'
-      case 'FINALIZAT': return 'Finalizat'
-      case 'ANULAT': return 'Anulat'
-      default: return status
-    }
-  }
+  const getStatusLabel = (status: string) => RETURN_STATUS_LABEL[normalizeStatus(status)]
 
   if (loading) {
     return (
@@ -554,33 +625,48 @@ export default function ReturnDetailsPage() {
               }}>
                 Status
               </label>
-              <select
-                value={dataToDisplay.status}
-                onChange={(e) => {
-                  if (isEditMode) {
-                    setEditedData({ ...editedData, status: e.target.value as any })
-                  }
-                }}
-                disabled={!isEditMode}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: '8px',
-                  border: '1px solid #e0e0e0',
-                  fontSize: '14px',
-                  backgroundColor: isEditMode ? '#fff' : '#f5f5f5',
-                  cursor: isEditMode ? 'pointer' : 'not-allowed',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
-              >
-                <option value="INITIAT">Inițiat</option>
-                <option value="IN_ASTEPTARE_COLET">În așteptarea coletului</option>
-                <option value="COLET_PRIMIT">Colet primit</option>
-                <option value="PROCESAT">Procesat</option>
-                <option value="FINALIZAT">Finalizat</option>
-                <option value="ANULAT">Anulat</option>
-              </select>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  backgroundColor: getStatusColor(returnData.status),
+                  display: 'inline-block',
+                  flexShrink: 0,
+                }} />
+                <select
+                  value={returnData.status}
+                  onChange={(e) => handleStatusSelect(e.target.value as ReturnStatus)}
+                  disabled={isEditMode || statusSubmitting}
+                  title={isEditMode ? 'Ieși din modul editare ca să schimbi statusul' : 'Schimbă statusul'}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0',
+                    fontSize: '14px',
+                    backgroundColor: isEditMode ? '#f5f5f5' : '#fff',
+                    cursor: isEditMode || statusSubmitting ? 'not-allowed' : 'pointer',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    opacity: isEditMode ? 0.6 : 1,
+                  }}
+                >
+                  {RETURN_STATUS_LIST.map((k) => (
+                    <option key={k} value={k}>
+                      {RETURN_STATUS_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+                {statusSubmitting && (
+                  <span style={{ fontSize: '12px', color: '#666' }}>Se salvează…</span>
+                )}
+              </div>
+              {statusError && (
+                <div style={{ fontSize: '12px', color: '#dc2626', marginTop: '6px' }}>
+                  {statusError}
+                </div>
+              )}
             </div>
 
             <div>
@@ -1088,6 +1174,80 @@ export default function ReturnDetailsPage() {
               </div>
             )}
           </div>
+          {dataToDisplay.awbNumber && (
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#333', margin: 0 }}>
+                  Tracking SameDay
+                </h3>
+                <button
+                  type="button"
+                  onClick={refreshTracking}
+                  disabled={trackingLoading}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #26a69a',
+                    backgroundColor: trackingLoading ? '#f5f5f5' : '#fff',
+                    color: '#26a69a',
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    cursor: trackingLoading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {trackingLoading ? 'Verific…' : (tracking ? 'Reîmprospătează' : 'Verifică tracking')}
+                </button>
+              </div>
+              {trackingError && (
+                <div style={{ padding: '10px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#dc2626', fontSize: '13px', marginBottom: '10px' }}>
+                  {trackingError}
+                </div>
+              )}
+              {trackingMsg && (
+                <div style={{ padding: '10px', backgroundColor: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', color: '#065f46', fontSize: '13px', marginBottom: '10px' }}>
+                  {trackingMsg}
+                </div>
+              )}
+              {tracking && (
+                <div style={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e0e0e0', padding: '14px' }}>
+                  {tracking.expeditionStatus ? (
+                    <div style={{ fontSize: '13px', color: '#333', marginBottom: tracking.history.length ? '12px' : 0 }}>
+                      <strong>Status curier:</strong> {tracking.expeditionStatus}
+                      {typeof tracking.expeditionStatusId === 'number' && (
+                        <span style={{ color: '#999' }}> (id {tracking.expeditionStatusId})</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '13px', color: '#666' }}>
+                      AWB necunoscut la curier sau fără evenimente încă.
+                    </div>
+                  )}
+                  {tracking.history.length > 0 && (
+                    <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {tracking.history.map((ev, i) => (
+                        <li key={`${ev.statusDate}-${i}`} style={{
+                          fontSize: '13px',
+                          color: '#333',
+                          padding: '8px 0',
+                          borderTop: i === 0 ? 'none' : '1px solid #f0f0f0',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 'bold' }}>{ev.status || '—'}</span>
+                            <span style={{ color: '#666' }}>
+                              {ev.statusDate ? new Date(ev.statusDate).toLocaleString('ro-RO') : ''}
+                            </span>
+                          </div>
+                          {ev.transitLocation && (
+                            <div style={{ color: '#888', marginTop: '2px' }}>{ev.transitLocation}</div>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {(dataToDisplay.shippingReceiptPhoto || dataToDisplay.packageLabelPhoto) && (
             <div>
               <p style={{
@@ -1226,6 +1386,7 @@ export default function ReturnDetailsPage() {
           </div>
         </div>
       </div>
+
     </div>
   )
 }

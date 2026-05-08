@@ -68,8 +68,8 @@ export async function POST(
       )
     }
 
-    // Anulare permisă doar înainte ca pachetul să fi ajuns la noi
-    const statusCancellable = ret.status === 'INITIAT' || ret.status === 'IN_ASTEPTARE_COLET'
+    // Anulare permisă doar înainte ca pachetul să fi fost preluat de curier
+    const statusCancellable = ret.status === 'INITIAT'
     if (!statusCancellable) {
       return NextResponse.json(
         {
