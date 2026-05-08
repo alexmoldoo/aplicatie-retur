@@ -78,7 +78,12 @@ export default function ReturnsPage() {
       }
       const { processed, updated, skipped, errors } = data
       const errPart = errors?.length ? ` · ${errors.length} erori` : ''
-      setSyncMsg(`Verificate: ${processed} · Actualizate: ${updated} · Neschimbate: ${skipped}${errPart}`)
+      let detail = `Verificate: ${processed} · Actualizate: ${updated} · Neschimbate: ${skipped}${errPart}`
+      if (errors?.length) {
+        const first = errors.slice(0, 3).map((e: any) => `${e.idRetur} (${e.awbNumber}): ${e.error}`).join(' | ')
+        detail += ` — ${first}`
+      }
+      setSyncMsg(detail)
       if (updated > 0) {
         await loadReturns()
       }
