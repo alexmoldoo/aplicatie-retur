@@ -18,13 +18,16 @@ interface ReturnCode {
   createdByEmail?: string | null
   usedAt: string | null
   usedByReturnId: string | null
+  sentAt: string | null
 }
 
-type StatusFilter = 'all' | 'active' | 'used' | 'inactive'
+type StatusFilter = 'all' | 'active' | 'used' | 'inactive' | 'sent' | 'not_sent'
 
 const STATUS_LABEL: Record<StatusFilter, string> = {
   all: 'Toate',
   active: 'Active (nefolosite)',
+  not_sent: 'Active netrimise',
+  sent: 'Trimise (în așteptare)',
   used: 'Folosite',
   inactive: 'Dezactivate',
 }
@@ -133,6 +136,25 @@ export default function CoduriPage() {
       setTimeout(() => setCopiedCode(c => (c === code ? null : c)), 1500)
     } catch {
       // ignore
+    }
+  }
+
+  const toggleSent = async (c: ReturnCode) => {
+    if (c.usedAt) return
+    try {
+      const r = await fetch(`/api/admin/codes/${encodeURIComponent(c.code)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sent: !c.sentAt }),
+      })
+      const data = await r.json()
+      if (!r.ok || !data.success) {
+        setError(data?.message || 'Eroare la marcarea ca trimis.')
+        return
+      }
+      await load()
+    } catch {
+      setError('Eroare la conectare.')
     }
   }
 
@@ -302,6 +324,7 @@ export default function CoduriPage() {
                 <th>Tip</th>
                 <th>Notă</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
+                <th style={{ textAlign: 'center' }}>Trimis</th>
                 <th>Creat</th>
                 <th>De către</th>
                 <th>Folosit</th>
@@ -326,6 +349,28 @@ export default function CoduriPage() {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span className={`${s.badge} ${st.klass}`}>{st.label}</span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {c.usedAt ? (
+                        <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                      ) : (
+                        <label
+                          title={c.sentAt ? `Trimis: ${new Date(c.sentAt).toLocaleString('ro-RO')} — click pentru a anula` : 'Click pentru a marca codul ca trimis clientului'}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!c.sentAt}
+                            onChange={() => toggleSent(c)}
+                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                          />
+                          {c.sentAt && (
+                            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                              {new Date(c.sentAt).toLocaleDateString('ro-RO')}
+                            </span>
+                          )}
+                        </label>
+                      )}
                     </td>
                     <td style={{ color: 'var(--color-text-muted)' }}>
                       {new Date(c.createdAt).toLocaleDateString('ro-RO')}

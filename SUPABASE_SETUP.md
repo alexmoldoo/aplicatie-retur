@@ -80,12 +80,14 @@ CREATE TABLE return_codes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_by UUID REFERENCES users(id),            -- admin care l-a generat
   used_at TIMESTAMPTZ,                             -- NULL = nefolosit încă
-  used_by_return_id TEXT REFERENCES returns(id_retur)
+  used_by_return_id TEXT REFERENCES returns(id_retur),
+  sent_at TIMESTAMPTZ                               -- NULL = încă nu a fost trimis clientului; admin bifează manual
 );
 
--- Dacă ai deja tabelul `return_codes` din migrația anterioară, rulează DOAR:
+-- Dacă ai deja tabelul `return_codes` din migrațiile anterioare, rulează DOAR:
 -- ALTER TABLE return_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'free_shipping'
 --   CHECK (kind IN ('free_shipping', 'direct_refund'));
+-- ALTER TABLE return_codes ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
 
 -- Indexuri pentru performanță
 CREATE INDEX idx_returns_numar_comanda ON returns(numar_comanda);
