@@ -175,6 +175,7 @@ export default function SignaturePopup({
           metodaTrimitere: refundData.metodaTrimitere,
           costTransport: refundData.costTransport,
         },
+        codeRedemption: refundData.codeRedemption,
         signature: signatureDataUrl,
         sessionToken,
       }

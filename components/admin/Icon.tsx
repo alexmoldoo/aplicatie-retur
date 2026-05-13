@@ -139,6 +139,24 @@ export function SearchIcon({ size = 18, ...rest }: IconProps) {
   )
 }
 
+export function TicketIcon({ size = 22, ...rest }: IconProps) {
+  return (
+    <svg {...baseProps(size, rest)}>
+      <path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4Z" />
+      <path d="M13 7v10" strokeDasharray="2 2" />
+    </svg>
+  )
+}
+
+export function CopyIcon({ size = 16, ...rest }: IconProps) {
+  return (
+    <svg {...baseProps(size, rest)}>
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  )
+}
+
 export function InboxIcon({ size = 36, ...rest }: IconProps) {
   return (
     <svg {...baseProps(size, rest)}>

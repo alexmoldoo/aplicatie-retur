@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { findReturnById, deleteReturn } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
+import { findCodeByReturnId } from '@/lib/return-codes'
 import fs from 'fs'
 
 export const dynamic = 'force-dynamic'
@@ -26,17 +27,20 @@ export async function GET(
     }
 
     const returnData = await findReturnById(params.id)
-    
+
     if (!returnData) {
       return NextResponse.json(
         { success: false, message: 'Return not found' },
         { status: 404 }
       )
     }
-    
+
+    // Atașează codul de retur gratuit folosit (dacă există) — afișat în detalii admin.
+    const usedCode = await findCodeByReturnId(returnData.idRetur)
+
     return NextResponse.json({
       success: true,
-      return: returnData,
+      return: { ...returnData, usedCode: usedCode || null },
     })
   } catch (error) {
     console.error('Error getting return:', error)

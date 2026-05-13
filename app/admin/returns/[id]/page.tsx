@@ -31,6 +31,7 @@ interface ReturnData {
   awbNumber?: string
   shippingReceiptPhoto?: string
   packageLabelPhoto?: string
+  usedCode?: { code: string; kind?: 'free_shipping' | 'direct_refund'; note: string | null } | null
 }
 
 export default function ReturnDetailsPage() {
@@ -767,6 +768,46 @@ export default function ReturnDetailsPage() {
               </div>
             </div>
           </div>
+
+          {dataToDisplay.usedCode && (() => {
+            const isDirectRefund = dataToDisplay.usedCode.kind === 'direct_refund'
+            const palette = isDirectRefund
+              ? { bg: '#fef3c7', border: '#fcd34d', titleColor: '#92400e', subColor: '#b45309', chipBg: '#fde68a' }
+              : { bg: '#ecfdf5', border: '#a7f3d0', titleColor: '#065f46', subColor: '#047857', chipBg: '#d1fae5' }
+            return (
+              <div style={{
+                marginTop: '20px',
+                padding: '14px 18px',
+                borderRadius: '10px',
+                backgroundColor: palette.bg,
+                border: `1px solid ${palette.border}`,
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap'
+              }}>
+                <div style={{ fontSize: '20px', lineHeight: 1 }}>{isDirectRefund ? '💸' : '🎟️'}</div>
+                <div style={{ flex: 1, minWidth: '200px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: palette.titleColor, marginBottom: '4px' }}>
+                    {isDirectRefund ? 'Decont direct aplicat' : 'Retur gratuit aplicat'} — cod{' '}
+                    <span style={{ fontFamily: 'monospace', backgroundColor: palette.chipBg, padding: '2px 8px', borderRadius: '6px' }}>
+                      {dataToDisplay.usedCode.code}
+                    </span>
+                  </div>
+                  {isDirectRefund && (
+                    <div style={{ fontSize: '13px', color: palette.subColor, marginBottom: dataToDisplay.usedCode.note ? '4px' : 0 }}>
+                      Plătește IBAN-ul clientului și marchează manual ca FINALIZAT după transfer. Coletul nu se ridică — clientul păstrează produsul.
+                    </div>
+                  )}
+                  {dataToDisplay.usedCode.note && (
+                    <div style={{ fontSize: '13px', color: palette.subColor }}>
+                      Notă: {dataToDisplay.usedCode.note}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         {/* Produse returnate */}

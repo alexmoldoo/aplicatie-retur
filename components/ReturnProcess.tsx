@@ -64,6 +64,8 @@ export interface RefundData {
   // Pas 5 — metoda de expediere a coletului către magazin
   metodaTrimitere?: 'curier' | 'manual'
   costTransport?: number       // 0 pentru manual, 15.99 pentru curier
+  // Cod retur gratuit aplicat în Pas 5 (forțează curier cu cost 0).
+  codeRedemption?: string
 }
 
 export default function ReturnProcess() {
@@ -187,6 +189,7 @@ export default function ReturnProcess() {
     metodaTrimitere: 'curier' | 'manual'
     costTransport: number
     pickupContact?: ShippingAddress & { email?: string }
+    codeRedemption?: string
   }) => {
     // Mergem mai departe DOAR dacă datele sunt complete
     if (orderData && products.length > 0 && refundData) {
@@ -205,6 +208,7 @@ export default function ReturnProcess() {
         ...refundData,
         metodaTrimitere: shippingInfo.metodaTrimitere,
         costTransport: shippingInfo.costTransport,
+        codeRedemption: shippingInfo.codeRedemption,
       })
       setShowSignaturePopup(true)
     } else {

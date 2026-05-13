@@ -14,6 +14,7 @@ import {
   PaletteIcon,
   PenIcon,
   UsersIcon,
+  TicketIcon,
   LogoutIcon,
   MenuIcon,
   CloseIcon,
@@ -37,6 +38,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/admin', Icon: HomeIcon, label: 'Dashboard' },
   { href: '/admin/retururi', Icon: PackageIcon, label: 'Retururi' },
+  { href: '/admin/coduri', Icon: TicketIcon, label: 'Coduri retur gratuit' },
   { href: '/admin/shopify', Icon: StoreIcon, label: 'Shopify' },
   { href: '/admin/adresa', Icon: MapPinIcon, label: 'Adresa de retur' },
   { href: '/admin/branding', Icon: PaletteIcon, label: 'Branding' },
