@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     if (codeRedemptionRaw && !codeRedemption) {
       await logAudit({ action: 'create_return_invalid_code', ip, details: { reason: 'invalid_format' } })
       return NextResponse.json(
-        { success: false, message: 'Codul de retur gratuit are un format invalid.' },
+        { success: false, message: 'Codul de retur are un format invalid.' },
         { status: 400 }
       )
     }
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
       if (!check.valid) {
         await logAudit({ action: 'create_return_invalid_code', ip, details: { code: codeRedemption, reason: check.reason } })
         return NextResponse.json(
-          { success: false, message: 'Codul de retur gratuit este invalid sau a fost deja folosit.' },
+          { success: false, message: 'Codul de retur este invalid sau a fost deja folosit.' },
           { status: 400 }
         )
       }
@@ -260,7 +260,7 @@ export async function POST(request: NextRequest) {
           details: { reason: 'code_requires_curier', method: metodaTrimitere },
         })
         return NextResponse.json(
-          { success: false, message: 'Codul de retur gratuit forțează metoda „Curier la adresă".' },
+          { success: false, message: 'Codul de retur forțează metoda „Curier la adresă".' },
           { status: 400 }
         )
       }

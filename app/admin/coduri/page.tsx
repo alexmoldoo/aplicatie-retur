@@ -174,7 +174,7 @@ export default function CoduriPage() {
   return (
     <>
       <PageHeader
-        title="Coduri retur gratuit"
+        title="Coduri retur"
         actions={
           <>
             <span className="coduri-info" tabIndex={0} aria-label="Despre tipurile de coduri">
@@ -402,7 +402,7 @@ export default function CoduriPage() {
             }}
           >
             <h2 style={{ margin: '0 0 var(--space-4)', fontSize: 'var(--font-size-xl)', fontWeight: 'var(--font-weight-bold)' }}>
-              Generează coduri retur gratuit
+              Generează coduri retur
             </h2>
 
             {generatedBatch.length === 0 ? (
