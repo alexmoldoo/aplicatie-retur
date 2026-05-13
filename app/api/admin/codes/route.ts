@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url)
-  const status = (searchParams.get('status') || 'all') as 'all' | 'active' | 'used' | 'inactive'
+  const status = (searchParams.get('status') || 'all') as 'all' | 'active' | 'used' | 'inactive' | 'sent' | 'not_sent'
   const search = searchParams.get('search') || undefined
 
   try {

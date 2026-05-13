@@ -3,14 +3,14 @@ import { cookies } from 'next/headers'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getClientIp } from '@/lib/security'
-import { deleteCode, normalizeCode, toggleCodeActive } from '@/lib/return-codes'
+import { deleteCode, markCodeSent, normalizeCode, toggleCodeActive } from '@/lib/return-codes'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 /**
- * PATCH /api/admin/codes/[code] — toggle active.
- * Body: { active: boolean }
+ * PATCH /api/admin/codes/[code] — toggle active sau sent.
+ * Body: { active: boolean } SAU { sent: boolean }
  */
 export async function PATCH(
   request: NextRequest,
@@ -29,14 +29,31 @@ export async function PATCH(
     return NextResponse.json({ success: false, message: 'Cod invalid.' }, { status: 400 })
   }
 
-  let body: { active?: unknown }
+  let body: { active?: unknown; sent?: unknown }
   try {
     body = await request.json()
   } catch {
     body = {}
   }
+
+  if (typeof body.sent === 'boolean') {
+    const updated = await markCodeSent(code, body.sent)
+    if (!updated) {
+      return NextResponse.json(
+        { success: false, message: 'Codul nu există sau este deja folosit.' },
+        { status: 404 }
+      )
+    }
+    await logAudit({
+      action: 'admin_code_sent_toggled',
+      ip,
+      details: { code, sent: body.sent, by: user.email },
+    })
+    return NextResponse.json({ success: true, code: updated })
+  }
+
   if (typeof body.active !== 'boolean') {
-    return NextResponse.json({ success: false, message: 'Lipsește câmpul active (boolean).' }, { status: 400 })
+    return NextResponse.json({ success: false, message: 'Lipsește câmpul active sau sent (boolean).' }, { status: 400 })
   }
 
   const updated = await toggleCodeActive(code, body.active)

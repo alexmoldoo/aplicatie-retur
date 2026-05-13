@@ -28,6 +28,7 @@ export type AuditAction =
   | 'register_denied'
   | 'admin_code_generated'
   | 'admin_code_toggled'
+  | 'admin_code_sent_toggled'
   | 'admin_code_deleted'
   | 'code_check'
   | 'code_check_rate_limited'

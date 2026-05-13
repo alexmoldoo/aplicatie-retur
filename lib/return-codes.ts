@@ -40,6 +40,7 @@ export interface ReturnCode {
   createdByEmail?: string | null
   usedAt: string | null
   usedByReturnId: string | null
+  sentAt: string | null
 }
 
 /** Derivă tipul codului din prefixul lui. */
@@ -137,7 +138,7 @@ export async function releaseCode(code: string): Promise<void> {
 }
 
 export interface ListFilter {
-  status?: 'all' | 'active' | 'used' | 'inactive'
+  status?: 'all' | 'active' | 'used' | 'inactive' | 'sent' | 'not_sent'
   search?: string
   limit?: number
 }
@@ -152,7 +153,7 @@ export async function listCodes(filter: ListFilter = {}): Promise<ReturnCode[]> 
 
   let query = sb
     .from('return_codes')
-    .select('code, kind, note, active, created_at, created_by, used_at, used_by_return_id, users:created_by(email)')
+    .select('code, kind, note, active, created_at, created_by, used_at, used_by_return_id, sent_at, users:created_by(email)')
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -162,6 +163,10 @@ export async function listCodes(filter: ListFilter = {}): Promise<ReturnCode[]> 
     query = query.not('used_at', 'is', null)
   } else if (status === 'inactive') {
     query = query.eq('active', false).is('used_at', null)
+  } else if (status === 'sent') {
+    query = query.is('used_at', null).not('sent_at', 'is', null)
+  } else if (status === 'not_sent') {
+    query = query.is('used_at', null).is('sent_at', null).eq('active', true)
   }
 
   if (filter.search) {
@@ -181,7 +186,35 @@ export async function listCodes(filter: ListFilter = {}): Promise<ReturnCode[]> 
     createdByEmail: (row as any).users?.email ?? null,
     usedAt: row.used_at,
     usedByReturnId: row.used_by_return_id,
+    sentAt: (row as any).sent_at ?? null,
   }))
+}
+
+/**
+ * Marchează un cod ca trimis (sent=true setează NOW()) sau resetează (sent=false setează NULL).
+ * Doar pentru coduri nefolosite. Returnează codul actualizat sau null.
+ */
+export async function markCodeSent(code: string, sent: boolean): Promise<ReturnCode | null> {
+  const sb = requireSupabase()
+  const { data, error } = await sb
+    .from('return_codes')
+    .update({ sent_at: sent ? new Date().toISOString() : null })
+    .eq('code', code)
+    .is('used_at', null)
+    .select('code, kind, note, active, created_at, created_by, used_at, used_by_return_id, sent_at')
+    .maybeSingle()
+  if (error || !data) return null
+  return {
+    code: data.code,
+    kind: ((data as any).kind as CodeKind) || kindFromCode(data.code),
+    note: data.note,
+    active: data.active,
+    createdAt: data.created_at,
+    createdBy: data.created_by,
+    usedAt: data.used_at,
+    usedByReturnId: data.used_by_return_id,
+    sentAt: (data as any).sent_at ?? null,
+  }
 }
 
 /**
@@ -224,7 +257,7 @@ export async function toggleCodeActive(code: string, active: boolean): Promise<R
     .update({ active })
     .eq('code', code)
     .is('used_at', null)
-    .select('code, kind, note, active, created_at, created_by, used_at, used_by_return_id')
+    .select('code, kind, note, active, created_at, created_by, used_at, used_by_return_id, sent_at')
     .maybeSingle()
   if (error || !data) return null
   return {
@@ -236,6 +269,7 @@ export async function toggleCodeActive(code: string, active: boolean): Promise<R
     createdBy: data.created_by,
     usedAt: data.used_at,
     usedByReturnId: data.used_by_return_id,
+    sentAt: (data as any).sent_at ?? null,
   }
 }
 
