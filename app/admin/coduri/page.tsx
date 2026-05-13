@@ -175,13 +175,82 @@ export default function CoduriPage() {
     <>
       <PageHeader
         title="Coduri retur gratuit"
-        subtitle={'Două tipuri: „Curier gratuit" (cost transport 0) sau „Decont direct" — cu prefix D, fără AWB, banii direct la client.'}
         actions={
-          <button onClick={() => setShowModal(true)} className={`${s.btn} ${s.btnPrimary}`}>
-            Generează cod
-          </button>
+          <>
+            <span className="coduri-info" tabIndex={0} aria-label="Despre tipurile de coduri">
+              <span className="coduri-info-icon" aria-hidden="true">i</span>
+              <span className="coduri-info-tooltip" role="tooltip">
+                <strong>Curier gratuit</strong> (cod ex: 7392K) — clientul plătește 0 RON transport, curierul SameDay ridică coletul normal.<br /><br />
+                <strong>Decont direct</strong> (cod ex: D7392K) — fără curier, fără AWB. Clientul păstrează produsul, tu plătești integral pe IBAN și marchezi manual ca FINALIZAT.
+              </span>
+            </span>
+            <button onClick={() => setShowModal(true)} className={`${s.btn} ${s.btnPrimary}`}>
+              Generează cod
+            </button>
+          </>
         }
       />
+      <style jsx>{`
+        .coduri-info {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: #e5e7eb;
+          color: #4b5563;
+          font-family: Georgia, 'Times New Roman', serif;
+          font-style: italic;
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1;
+          cursor: help;
+          user-select: none;
+          outline: none;
+        }
+        .coduri-info:hover,
+        .coduri-info:focus {
+          background: #d1d5db;
+          color: #111827;
+        }
+        .coduri-info-icon {
+          pointer-events: none;
+        }
+        .coduri-info-tooltip {
+          position: absolute;
+          top: calc(100% + 8px);
+          right: 0;
+          width: 280px;
+          padding: 10px 12px;
+          background: #111827;
+          color: #f9fafb;
+          font-size: 12px;
+          line-height: 1.5;
+          font-style: normal;
+          font-weight: 400;
+          font-family: inherit;
+          border-radius: 8px;
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+          opacity: 0;
+          visibility: hidden;
+          transform: translateY(-4px);
+          transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+          z-index: 50;
+          text-align: left;
+          white-space: normal;
+        }
+        .coduri-info-tooltip strong {
+          color: #fff;
+        }
+        .coduri-info:hover .coduri-info-tooltip,
+        .coduri-info:focus .coduri-info-tooltip {
+          opacity: 1;
+          visibility: visible;
+          transform: translateY(0);
+        }
+      `}</style>
 
       {error && <div className={`${s.alert} ${s.alertError}`}>{error}</div>}
       {success && <div className={`${s.alert} ${s.alertSuccess}`}>{success}</div>}
