@@ -215,11 +215,9 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
       <div className="is-header">
         <div className="is-header-icon" aria-hidden="true">{isDirectRefund ? '💸' : '📦'}</div>
         <h2 className="is-title">{isDirectRefund ? 'Aproape gata' : 'Cum trimiți coletul'}</h2>
-        <p className="is-subtitle">
-          {isDirectRefund
-            ? 'Codul tău forțează decont direct — nu mai e nevoie să trimiți coletul.'
-            : 'Coletul îl trimiți tu către noi. Alege metoda care ți se potrivește.'}
-        </p>
+        {!isDirectRefund && (
+          <p className="is-subtitle">Coletul îl trimiți tu către noi. Alege metoda care ți se potrivește.</p>
+        )}
       </div>
 
       {error && (
@@ -243,7 +241,7 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
 
       {/* Cum trimiți */}
       <div className="is-card">
-        <h3 className="is-card-title">{isDirectRefund ? '🎟️ Cod retur gratuit' : '🚚 Cum trimiți coletul'}</h3>
+        <h3 className="is-card-title">{isDirectRefund ? '🎟️ Cod retur' : '🚚 Cum trimiți coletul'}</h3>
         {!isDirectRefund && (
           <p className="is-card-text">Alege metoda — costul se scade direct din suma rambursată.</p>
         )}
@@ -255,18 +253,18 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
               <span className="is-code-applied-icon" aria-hidden="true">🎟️</span>
               <div className="is-code-applied-body">
                 <div className="is-code-applied-title">Cod aplicat: <code>{appliedCode}</code></div>
-                <div className="is-code-applied-sub">
-                  {isDirectRefund
-                    ? 'Nu trebuie să trimiți coletul. Banii vor fi rambursați direct în contul tău și poți păstra produsul.'
-                    : 'Curierul vine la tine fără cost — primești refund integral.'}
-                </div>
+                {!isDirectRefund && (
+                  <div className="is-code-applied-sub">
+                    Curierul vine la tine fără cost — primești refund integral.
+                  </div>
+                )}
               </div>
               <button type="button" onClick={clearCode} className="is-code-clear">Elimină</button>
             </div>
           ) : (
             <>
               <label htmlFor="freeReturnCode" className="is-code-label">
-                Ai un cod de retur gratuit? <span className="is-code-optional">(opțional)</span>
+                Ai un Cod de retur
               </label>
               <div className="is-code-row">
                 <input
@@ -649,11 +647,6 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
           font-weight: 600;
           color: #374151;
           margin-bottom: 8px;
-        }
-        .is-code-optional {
-          color: #9ca3af;
-          font-weight: 400;
-          font-size: 12px;
         }
         .is-code-row {
           display: flex;
