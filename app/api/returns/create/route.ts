@@ -8,6 +8,7 @@ import { getClientIp, makeRateLimiter, isAllowedOrigin, formatWaitTime } from '@
 import { isBlocked, recordFail } from '@/lib/ip-blocklist'
 import { createReturnAWB } from '@/lib/sameday'
 import { validateRomanianIBAN } from '@/lib/iban-validator'
+import { normalizeCode, validateCodeForRedemption, redeemCode, releaseCode, type CodeKind } from '@/lib/return-codes'
 import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
@@ -102,6 +103,34 @@ export async function POST(request: NextRequest) {
       signature: string
       sessionToken?: string
     } = body
+
+    // Cod de retur gratuit (opțional, propagat din Pas 5). Forțează curier + cost 0.
+    const codeRedemptionRaw = typeof body.codeRedemption === 'string' ? body.codeRedemption : null
+    const codeRedemption = codeRedemptionRaw ? normalizeCode(codeRedemptionRaw) : null
+    if (codeRedemptionRaw && !codeRedemption) {
+      await logAudit({ action: 'create_return_invalid_code', ip, details: { reason: 'invalid_format' } })
+      return NextResponse.json(
+        { success: false, message: 'Codul de retur gratuit are un format invalid.' },
+        { status: 400 }
+      )
+    }
+    let codeWaiver = false
+    let codeKind: CodeKind | null = null
+    if (codeRedemption) {
+      const check = await validateCodeForRedemption(codeRedemption)
+      if (!check.valid) {
+        await logAudit({ action: 'create_return_invalid_code', ip, details: { code: codeRedemption, reason: check.reason } })
+        return NextResponse.json(
+          { success: false, message: 'Codul de retur gratuit este invalid sau a fost deja folosit.' },
+          { status: 400 }
+        )
+      }
+      codeWaiver = true
+      codeKind = check.kind || 'free_shipping'
+    }
+    // Pentru decont direct (cod cu prefix D): magazinul plătește direct, clientul
+    // NU mai trimite produsul. Sărim AWB, ignorăm metodaTrimitere, totalRefund = subtotal.
+    const isDirectRefund = codeKind === 'direct_refund'
 
     // 3. Verificare token de sesiune (emis în Pas 1)
     const session = verifyCustomerToken(sessionToken)
@@ -202,31 +231,56 @@ export async function POST(request: NextRequest) {
     }, 0)
 
     // Validare metoda de trimitere + cost transport (whitelist server-side)
-    const metodaTrimitere = refundData.metodaTrimitere
-    const costTransportRaw = typeof refundData.costTransport === 'number' ? refundData.costTransport : 0
+    // Pentru decont direct sărim toată secțiunea: clientul nu mai trimite coletul.
+    let metodaTrimitere: 'curier' | 'manual'
+    let costTransport = 0
+    if (isDirectRefund) {
+      // Forțăm „curier" pe DB pentru consistență (oricum nu generăm AWB).
+      // Cost 0 — magazinul plătește subtotalul complet, fără deducere de transport.
+      metodaTrimitere = 'curier'
+      costTransport = 0
+    } else {
+      const metodaTrimitereRaw = refundData.metodaTrimitere
+      const costTransportRaw = typeof refundData.costTransport === 'number' ? refundData.costTransport : 0
 
-    if (!metodaTrimitere || (metodaTrimitere !== 'curier' && metodaTrimitere !== 'manual')) {
-      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_shipping_method' } })
-      return NextResponse.json(
-        { success: false, message: 'Metoda de trimitere lipsește.' },
-        { status: 400 }
-      )
-    }
+      if (!metodaTrimitereRaw || (metodaTrimitereRaw !== 'curier' && metodaTrimitereRaw !== 'manual')) {
+        await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_shipping_method' } })
+        return NextResponse.json(
+          { success: false, message: 'Metoda de trimitere lipsește.' },
+          { status: 400 }
+        )
+      }
+      metodaTrimitere = metodaTrimitereRaw
 
-    // Forțează costul corect server-side: îl citim direct din configul admin,
-    // nu îl primim de la client. Tolerăm o mică diferență de rotunjire.
-    const configuredCurierCost = await getCurierCost()
-    const costTransport = metodaTrimitere === 'curier' ? configuredCurierCost : 0
-    if (Math.abs(costTransportRaw - costTransport) > 0.01) {
-      await logAudit({
-        action: 'create_return_fail',
-        ip,
-        details: { reason: 'cost_transport_mismatch', sent: costTransportRaw, expected: costTransport },
-      })
-      return NextResponse.json(
-        { success: false, message: 'Cost transport invalid.' },
-        { status: 400 }
-      )
+      // Cod „curier gratuit" forțează curier — refuzăm dacă clientul a trimis „manual".
+      if (codeWaiver && metodaTrimitere !== 'curier') {
+        await logAudit({
+          action: 'create_return_fail',
+          ip,
+          details: { reason: 'code_requires_curier', method: metodaTrimitere },
+        })
+        return NextResponse.json(
+          { success: false, message: 'Codul de retur gratuit forțează metoda „Curier la adresă".' },
+          { status: 400 }
+        )
+      }
+
+      // Forțează costul corect server-side: îl citim din configul admin.
+      const configuredCurierCost = await getCurierCost()
+      costTransport = codeWaiver
+        ? 0
+        : (metodaTrimitere === 'curier' ? configuredCurierCost : 0)
+      if (Math.abs(costTransportRaw - costTransport) > 0.01) {
+        await logAudit({
+          action: 'create_return_fail',
+          ip,
+          details: { reason: 'cost_transport_mismatch', sent: costTransportRaw, expected: costTransport },
+        })
+        return NextResponse.json(
+          { success: false, message: 'Cost transport invalid.' },
+          { status: 400 }
+        )
+      }
     }
 
     // Total final după deducerea costului de transport
@@ -234,6 +288,27 @@ export async function POST(request: NextRequest) {
 
     // Generează ID retur
     const idRetur = await generateReturnId()
+
+    // Redeem atomic codul ÎNAINTE de AWB. Dacă pierde race-ul → 409.
+    // Dacă pașii ulteriori (AWB / DB insert) pică, eliberăm codul ca să poată fi
+    // refolosit (vezi `releaseCode` în blocurile catch de mai jos).
+    if (codeWaiver && codeRedemption) {
+      const ok = await redeemCode(codeRedemption, idRetur)
+      if (!ok) {
+        await logAudit({
+          action: 'create_return_code_race',
+          ip,
+          details: { code: codeRedemption, returnId: idRetur },
+        })
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'Codul tocmai a fost folosit de altcineva. Te rugăm să reîmprospătezi pagina.',
+          },
+          { status: 409 }
+        )
+      }
+    }
 
     // Obține baseUrl pentru generarea link-ului QR code
     const origin = request.headers.get('origin') || request.headers.get('host')
@@ -259,14 +334,14 @@ export async function POST(request: NextRequest) {
       subtotalProduse,
     }
 
-    // Generează AWB SameDay (doar pentru curier la adresă)
+    // Generează AWB SameDay (doar pentru curier la adresă, NU pentru decont direct)
     // Folosim adresa de livrare din comanda Shopify (orderContact) ca adresă de pickup.
     // Dacă lipsește vreun câmp esențial sau API-ul SameDay eșuează, întoarcem 502
     // ca să vadă clientul și să poată reîncerca / contacta suportul (în loc să generăm
     // un retur fără AWB, care ar fi invizibil pentru ei).
     let awbNumber: string | undefined
     let awbPdfUrl: string | null = null
-    if (metodaTrimitere === 'curier') {
+    if (metodaTrimitere === 'curier' && !isDirectRefund) {
       const pickupContact = (body as {
         orderContact?: {
           nume?: string
@@ -285,6 +360,7 @@ export async function POST(request: NextRequest) {
       if (!pickupContact.oras) missing.push('oraș')
       if (!pickupContact.judet) missing.push('județ')
       if (missing.length > 0) {
+        if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
         await logAudit({
           action: 'create_return_awb_fail',
           ip,
@@ -319,6 +395,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : 'unknown'
         console.error('SameDay AWB generation failed:', errMsg)
+        if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
         await logAudit({
           action: 'create_return_awb_fail',
           ip,
@@ -361,6 +438,7 @@ export async function POST(request: NextRequest) {
       await generateReturnPDF(tempReturn, qrCodeDataUrl)
     } catch (err) {
       console.error('PDF generation failed:', err)
+      if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
       return NextResponse.json(
         { success: false, message: 'Eroare la generarea PDF-ului. Încearcă din nou.' },
         { status: 500 }
@@ -388,17 +466,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Creează returul în baza de date
-    const newReturn = await createReturn(
-      orderData.numarComanda,
-      orderDataForReturn,
-      products,
-      refundDataForReturn,
-      signature,
-      totalRefund,
-      pdfPath,
-      qrCodeDataUrl,
-      idRetur
-    )
+    let newReturn
+    try {
+      newReturn = await createReturn(
+        orderData.numarComanda,
+        orderDataForReturn,
+        products,
+        refundDataForReturn,
+        signature,
+        totalRefund,
+        pdfPath,
+        qrCodeDataUrl,
+        idRetur
+      )
+    } catch (err) {
+      if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
+      throw err
+    }
 
     // Salvează AWB-ul (dacă a fost generat) pe rândul de retur
     if (awbNumber) {
@@ -419,6 +503,8 @@ export async function POST(request: NextRequest) {
         totalRefund: newReturn.totalRefund,
         metodaTrimitere,
         awbNumber: awbNumber || null,
+        codeRedemption: codeRedemption || null,
+        codeKind: codeKind || null,
       },
     })
 

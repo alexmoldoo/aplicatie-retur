@@ -67,11 +67,34 @@ CREATE TABLE returns (
   package_label_photo TEXT
 );
 
+-- Tabel coduri pentru retur gratuit (generate manual din admin pentru cazurile când
+-- vina e a magazinului — produs defect, comandă greșită etc.)
+-- Două tipuri: 'free_shipping' (curier 0 RON) și 'direct_refund' (cu prefix 'D' —
+-- magazinul plătește direct fără să mai aștepte coletul).
+CREATE TABLE return_codes (
+  code TEXT PRIMARY KEY,                          -- 4 cifre + 1 literă (ex: '7392K') sau 'D' + 4 cifre + 1 literă (ex: 'D7392K')
+  kind TEXT NOT NULL DEFAULT 'free_shipping'      -- 'free_shipping' = curier gratuit; 'direct_refund' = bani direct, fără AWB
+    CHECK (kind IN ('free_shipping', 'direct_refund')),
+  note TEXT,                                       -- motivul/contextul opțional (ex: „Produs defect — comanda #1234")
+  active BOOLEAN NOT NULL DEFAULT TRUE,            -- admin poate dezactiva fără să șteargă
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by UUID REFERENCES users(id),            -- admin care l-a generat
+  used_at TIMESTAMPTZ,                             -- NULL = nefolosit încă
+  used_by_return_id TEXT REFERENCES returns(id_retur)
+);
+
+-- Dacă ai deja tabelul `return_codes` din migrația anterioară, rulează DOAR:
+-- ALTER TABLE return_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'free_shipping'
+--   CHECK (kind IN ('free_shipping', 'direct_refund'));
+
 -- Indexuri pentru performanță
 CREATE INDEX idx_returns_numar_comanda ON returns(numar_comanda);
 CREATE INDEX idx_returns_status ON returns(status);
 CREATE INDEX idx_returns_created_at ON returns(created_at DESC);
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_return_codes_active ON return_codes(active) WHERE used_at IS NULL;
+CREATE INDEX idx_return_codes_created_at ON return_codes(created_at DESC);
+CREATE INDEX idx_return_codes_used_by_return ON return_codes(used_by_return_id) WHERE used_by_return_id IS NOT NULL;
 ```
 
 4. Click pe "Run" pentru a executa query-ul

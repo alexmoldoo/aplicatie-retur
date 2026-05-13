@@ -26,6 +26,13 @@ export type AuditAction =
   | 'auto_status_refresh_run'
   | 'register_bootstrap'
   | 'register_denied'
+  | 'admin_code_generated'
+  | 'admin_code_toggled'
+  | 'admin_code_deleted'
+  | 'code_check'
+  | 'code_check_rate_limited'
+  | 'create_return_invalid_code'
+  | 'create_return_code_race'
 
 export interface AuditEntry {
   timestamp: string

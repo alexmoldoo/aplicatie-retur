@@ -8,6 +8,7 @@ interface InformationStepProps {
     metodaTrimitere: 'curier' | 'manual'
     costTransport: number
     pickupContact?: ShippingAddress & { email?: string }
+    codeRedemption?: string
   }) => void
   onBack: () => void
   products: Product[]
@@ -50,6 +51,17 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // Cod de retur gratuit — opțional. Două tipuri:
+  // - `free_shipping`: ascunde opțiunea „manual", forțează curier cu cost 0.
+  // - `direct_refund` (cod cu D): ascunde TOATE metodele — clientul nu mai trimite
+  //   coletul, banii vin direct.
+  // Validare reală se face și server-side la submit.
+  const [codeInput, setCodeInput] = useState('')
+  const [appliedCode, setAppliedCode] = useState<string | null>(null)
+  const [appliedKind, setAppliedKind] = useState<'free_shipping' | 'direct_refund' | null>(null)
+  const [codeChecking, setCodeChecking] = useState(false)
+  const [codeError, setCodeError] = useState<string | null>(null)
+
   // Adresa de pickup — pre-completată din comanda Shopify, editabilă de client
   const [pickup, setPickup] = useState({
     nume: initialShipping?.nume || '',
@@ -84,10 +96,55 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
     .filter(p => p.selected && (p.cantitateReturnata || 0) > 0)
     .reduce((sum, p) => sum + p.pret * (p.cantitateReturnata || 0), 0)
 
-  const cost = metoda === 'curier' ? costuri.curier : 0
+  const codeApplied = !!appliedCode
+  const isDirectRefund = appliedKind === 'direct_refund'
+  const cost = codeApplied ? 0 : (metoda === 'curier' ? costuri.curier : 0)
   const totalRefund = Math.max(0, subtotal - cost)
 
   const showTelefon = adresa.telefon && adresa.telefon.trim() !== '' && adresa.telefon.trim() !== '-'
+
+  const applyCode = async () => {
+    setCodeError(null)
+    const trimmed = codeInput.trim().toUpperCase()
+    if (!trimmed) {
+      setCodeError('Introdu un cod.')
+      return
+    }
+    setCodeChecking(true)
+    try {
+      const r = await fetch('/api/returns/codes/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: trimmed }),
+      })
+      const data = await r.json()
+      if (data.valid) {
+        const kind: 'free_shipping' | 'direct_refund' = data.kind === 'direct_refund' ? 'direct_refund' : 'free_shipping'
+        setAppliedCode(trimmed)
+        setAppliedKind(kind)
+        setCodeInput(trimmed)
+        // Forțăm „curier" ca să trecem de checkout-ul de metoda în handleContinue.
+        // Pentru `direct_refund` serverul ignoră oricum metoda și sare peste AWB.
+        setMetoda('curier')
+        setCodeError(null)
+      } else {
+        setAppliedCode(null)
+        setAppliedKind(null)
+        setCodeError(data.message || 'Cod invalid.')
+      }
+    } catch {
+      setCodeError('Eroare la verificare. Reîncearcă.')
+    } finally {
+      setCodeChecking(false)
+    }
+  }
+
+  const clearCode = () => {
+    setAppliedCode(null)
+    setAppliedKind(null)
+    setCodeInput('')
+    setCodeError(null)
+  }
 
   const handleCopyAdresa = async () => {
     const lines = [
@@ -119,7 +176,8 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
     }
 
     let pickupContact: (ShippingAddress & { email?: string }) | undefined
-    if (metoda === 'curier') {
+    // Pentru decont direct nu trebuie pickup — magazinul nu mai ridică nimic.
+    if (metoda === 'curier' && !isDirectRefund) {
       const missing: string[] = []
       if (!pickup.nume.trim()) missing.push('nume')
       if (!pickup.telefon.trim()) missing.push('telefon')
@@ -148,16 +206,19 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
       metodaTrimitere: metoda,
       costTransport: cost,
       pickupContact,
+      codeRedemption: appliedCode || undefined,
     })
   }
 
   return (
     <div className="is-form step-form-large">
       <div className="is-header">
-        <div className="is-header-icon" aria-hidden="true">📦</div>
-        <h2 className="is-title">Cum trimiți coletul</h2>
+        <div className="is-header-icon" aria-hidden="true">{isDirectRefund ? '💸' : '📦'}</div>
+        <h2 className="is-title">{isDirectRefund ? 'Aproape gata' : 'Cum trimiți coletul'}</h2>
         <p className="is-subtitle">
-          Coletul îl trimiți tu către noi. Alege metoda care ți se potrivește.
+          {isDirectRefund
+            ? 'Codul tău forțează decont direct — nu mai e nevoie să trimiți coletul.'
+            : 'Coletul îl trimiți tu către noi. Alege metoda care ți se potrivește.'}
         </p>
       </div>
 
@@ -168,23 +229,88 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
         </div>
       )}
 
-      {/* Pregătește coletul */}
-      <div className="is-card">
-        <h3 className="is-card-title">📦 Pregătește coletul</h3>
-        <ul className="is-checklist">
-          <li>Produsele în starea originală, cu etichetele intacte</li>
-          <li>Include în colet formularul de retur (PDF) descărcat la pasul următor</li>
-          <li>Ambalează atent ca produsele să nu se deterioreze pe drum</li>
-        </ul>
-      </div>
+      {/* Pregătește coletul — ascuns pentru decont direct (nu mai trimite colet) */}
+      {!isDirectRefund && (
+        <div className="is-card">
+          <h3 className="is-card-title">📦 Pregătește coletul</h3>
+          <ul className="is-checklist">
+            <li>Produsele în starea originală, cu etichetele intacte</li>
+            <li>Include în colet formularul de retur (PDF) descărcat la pasul următor</li>
+            <li>Ambalează atent ca produsele să nu se deterioreze pe drum</li>
+          </ul>
+        </div>
+      )}
 
       {/* Cum trimiți */}
       <div className="is-card">
-        <h3 className="is-card-title">🚚 Cum trimiți coletul</h3>
-        <p className="is-card-text">Alege metoda — costul se scade direct din suma rambursată.</p>
+        <h3 className="is-card-title">{isDirectRefund ? '🎟️ Cod retur gratuit' : '🚚 Cum trimiți coletul'}</h3>
+        {!isDirectRefund && (
+          <p className="is-card-text">Alege metoda — costul se scade direct din suma rambursată.</p>
+        )}
+
+        {/* Cod retur gratuit — opțional */}
+        <div className={`is-code-box ${codeApplied ? 'is-code-box-applied' : ''}`}>
+          {codeApplied ? (
+            <div className="is-code-applied">
+              <span className="is-code-applied-icon" aria-hidden="true">🎟️</span>
+              <div className="is-code-applied-body">
+                <div className="is-code-applied-title">Cod aplicat: <code>{appliedCode}</code></div>
+                <div className="is-code-applied-sub">
+                  {isDirectRefund
+                    ? 'Nu trebuie să trimiți coletul. Banii vor fi rambursați direct în contul tău și poți păstra produsul.'
+                    : 'Curierul vine la tine fără cost — primești refund integral.'}
+                </div>
+              </div>
+              <button type="button" onClick={clearCode} className="is-code-clear">Elimină</button>
+            </div>
+          ) : (
+            <>
+              <label htmlFor="freeReturnCode" className="is-code-label">
+                Ai un cod de retur gratuit? <span className="is-code-optional">(opțional)</span>
+              </label>
+              <div className="is-code-row">
+                <input
+                  id="freeReturnCode"
+                  type="text"
+                  value={codeInput}
+                  onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setCodeError(null) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCode() } }}
+                  placeholder="ex: 7392K sau D7392K"
+                  maxLength={10}
+                  inputMode="text"
+                  autoCapitalize="characters"
+                  className="is-code-input"
+                />
+                <button
+                  type="button"
+                  onClick={applyCode}
+                  disabled={codeChecking || !codeInput.trim()}
+                  className="is-code-btn"
+                >
+                  {codeChecking ? 'Verific…' : 'Aplică'}
+                </button>
+              </div>
+              {codeError && <p className="is-code-error">{codeError}</p>}
+            </>
+          )}
+        </div>
 
         <div className="is-methods">
-          {/* Curier */}
+          {/* Decont direct — nu mai cere nicio decizie de expediere. */}
+          {isDirectRefund && (
+            <div className="is-direct-refund-notice">
+              <span className="is-direct-refund-icon" aria-hidden="true">✅</span>
+              <div className="is-direct-refund-body">
+                <strong className="is-direct-refund-title">Nu trebuie să trimiți coletul</strong>
+                <p className="is-direct-refund-text">
+                  Magazinul va rambursa direct suma integrală în contul tău (IBAN-ul completat la pasul anterior). Poți păstra produsul.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Curier — ascuns când e decont direct */}
+          {!isDirectRefund && (
           <label className={`is-method ${metoda === 'curier' ? 'is-method-active' : ''}`}>
             <input
               type="radio"
@@ -197,16 +323,21 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
               <div className="is-method-head">
                 <span className="is-method-icon">🏠</span>
                 <span className="is-method-title">Curier la adresă</span>
-                <span className="is-method-cost">−{costuri.curier.toFixed(2)} RON</span>
+                {codeApplied ? (
+                  <span className="is-method-cost is-method-free">Gratuit (cod aplicat)</span>
+                ) : (
+                  <span className="is-method-cost">−{costuri.curier.toFixed(2)} RON</span>
+                )}
               </div>
               <p className="is-method-text">
                 Curierul SameDay vine să ridice coletul de la adresa ta. Doar îl predai.
               </p>
             </div>
           </label>
+          )}
 
-          {/* Formular adresă pickup — afișat doar când curier */}
-          {metoda === 'curier' && (
+          {/* Formular adresă pickup — afișat doar când curier, NU pentru decont direct */}
+          {metoda === 'curier' && !isDirectRefund && (
             <div className="is-pickup-form">
               <div className="is-pickup-head">
                 <span className="is-pickup-title">📍 Adresa de unde ridicăm coletul</span>
@@ -248,29 +379,31 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
             </div>
           )}
 
-          {/* Manual */}
-          <label className={`is-method ${metoda === 'manual' ? 'is-method-active' : ''}`}>
-            <input
-              type="radio"
-              name="metodaTrimitere"
-              checked={metoda === 'manual'}
-              onChange={() => setMetoda('manual')}
-              className="is-method-radio"
-            />
-            <div className="is-method-body">
-              <div className="is-method-head">
-                <span className="is-method-icon">📮</span>
-                <span className="is-method-title">Trimit eu cu un curier ales de mine</span>
-                <span className="is-method-cost is-method-free">Refund integral</span>
+          {/* Manual — ascuns când codul gratuit e aplicat (codul forțează curier) */}
+          {!codeApplied && (
+            <label className={`is-method ${metoda === 'manual' ? 'is-method-active' : ''}`}>
+              <input
+                type="radio"
+                name="metodaTrimitere"
+                checked={metoda === 'manual'}
+                onChange={() => setMetoda('manual')}
+                className="is-method-radio"
+              />
+              <div className="is-method-body">
+                <div className="is-method-head">
+                  <span className="is-method-icon">📮</span>
+                  <span className="is-method-title">Trimit eu cu un curier ales de mine</span>
+                  <span className="is-method-cost is-method-free">Refund integral</span>
+                </div>
+                <p className="is-method-text">
+                  Alegi orice curier și plătești expedierea direct la el. Primești toți banii înapoi.
+                </p>
               </div>
-              <p className="is-method-text">
-                Alegi orice curier și plătești expedierea direct la el. Primești toți banii înapoi.
-              </p>
-            </div>
-          </label>
+            </label>
+          )}
 
           {/* Adresa de retur — afișată doar pentru manual */}
-          {metoda === 'manual' && (
+          {metoda === 'manual' && !codeApplied && (
             <div className="is-card is-address-card">
               <div className="is-card-head">
                 <h3 className="is-card-title">📍 Adresa de retur</h3>
@@ -340,7 +473,7 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
           onChange={e => setAccept(e.target.checked)}
           className="is-accept-checkbox"
         />
-        <span>Am citit informațiile de mai sus și înțeleg cum trimit coletul.</span>
+        <span>{isDirectRefund ? 'Am citit informațiile de mai sus.' : 'Am citit informațiile de mai sus și înțeleg cum trimit coletul.'}</span>
       </label>
 
       {/* Butoane */}
@@ -495,6 +628,136 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
           top: 6px;
           color: #26a69a;
           font-weight: 700;
+        }
+
+        /* Cod retur gratuit */
+        .is-code-box {
+          margin-bottom: 14px;
+          padding: 12px 14px;
+          background: #fff;
+          border: 1px dashed #d1d5db;
+          border-radius: 10px;
+        }
+        .is-code-box-applied {
+          background: linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%);
+          border: 1.5px solid #26a69a;
+          border-style: solid;
+        }
+        .is-code-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          color: #374151;
+          margin-bottom: 8px;
+        }
+        .is-code-optional {
+          color: #9ca3af;
+          font-weight: 400;
+          font-size: 12px;
+        }
+        .is-code-row {
+          display: flex;
+          gap: 8px;
+        }
+        .is-code-input {
+          flex: 1;
+          padding: 10px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 15px;
+          font-family: monospace;
+          font-weight: 700;
+          letter-spacing: 0.1em;
+          color: #111827;
+          background: #fff;
+          text-transform: uppercase;
+        }
+        .is-code-input:focus {
+          outline: none;
+          border-color: #26a69a;
+          box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.15);
+        }
+        .is-code-btn {
+          padding: 10px 16px;
+          border-radius: 8px;
+          background: #26a69a;
+          color: #fff;
+          border: none;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s ease, opacity 0.15s ease;
+        }
+        .is-code-btn:hover:not(:disabled) { background: #1e8e83; }
+        .is-code-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .is-code-error {
+          margin: 8px 0 0 0;
+          font-size: 12px;
+          color: #b91c1c;
+        }
+        .is-code-applied {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .is-code-applied-icon { font-size: 24px; }
+        .is-code-applied-body { flex: 1; min-width: 0; }
+        .is-code-applied-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #0f766e;
+        }
+        .is-code-applied-title code {
+          font-family: monospace;
+          letter-spacing: 0.1em;
+          background: rgba(15, 118, 110, 0.08);
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+        .is-code-applied-sub {
+          font-size: 12px;
+          color: #374151;
+          margin-top: 2px;
+        }
+        .is-code-clear {
+          padding: 6px 10px;
+          background: transparent;
+          color: #6b7280;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .is-direct-refund-notice {
+          margin-top: 16px;
+          padding: 16px 18px;
+          background: linear-gradient(180deg, #ecfdf5 0%, #f0fdf4 100%);
+          border: 1px solid #a7f3d0;
+          border-radius: 12px;
+          display: flex;
+          gap: 14px;
+          align-items: flex-start;
+        }
+        .is-direct-refund-icon { font-size: 24px; line-height: 1; }
+        .is-direct-refund-body { flex: 1; min-width: 0; }
+        .is-direct-refund-title {
+          display: block;
+          font-size: 14px;
+          font-weight: 700;
+          color: #047857;
+          margin-bottom: 4px;
+        }
+        .is-direct-refund-text {
+          font-size: 13px;
+          color: #374151;
+          line-height: 1.5;
+          margin: 0;
+        }
+        .is-code-clear:hover {
+          background: #f9fafb;
+          color: #374151;
         }
 
         .is-methods {
