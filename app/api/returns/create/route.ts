@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     if (codeRedemptionRaw && !codeRedemption) {
       await logAudit({ action: 'create_return_invalid_code', ip, details: { reason: 'invalid_format' } })
       return NextResponse.json(
-        { success: false, message: 'Codul de retur are un format invalid.' },
+        { success: false, message: 'Cod invalid.' },
         { status: 400 }
       )
     }

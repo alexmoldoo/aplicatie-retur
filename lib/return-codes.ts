@@ -84,16 +84,22 @@ interface ValidationResult {
  */
 export async function validateCodeForRedemption(code: string): Promise<ValidationResult> {
   const sb = requireSupabase()
+  // Nu cerem `kind` ca să rămânem compatibili cu schema înainte de migrație
+  // (kindFromCode derivă din prefixul codului).
   const { data, error } = await sb
     .from('return_codes')
-    .select('code, kind, note, active, used_at')
+    .select('code, note, active, used_at')
     .eq('code', code)
     .maybeSingle()
 
-  if (error || !data) return { valid: false, reason: 'not_found' }
+  if (error) {
+    console.error('[return-codes] validate error:', error)
+    return { valid: false, reason: 'not_found' }
+  }
+  if (!data) return { valid: false, reason: 'not_found' }
   if (!data.active) return { valid: false, reason: 'inactive' }
   if (data.used_at) return { valid: false, reason: 'used' }
-  return { valid: true, kind: (data.kind as CodeKind) || kindFromCode(data.code), note: data.note }
+  return { valid: true, kind: kindFromCode(data.code), note: data.note }
 }
 
 /**
