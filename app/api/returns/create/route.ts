@@ -46,8 +46,8 @@ async function getCurierCost(): Promise<number> {
 
 export const dynamic = 'force-dynamic'
 
-// Max 3 retururi / oră / IP — prevenția spam
-const checkRateLimit = makeRateLimiter({ max: 3, windowMs: 60 * 60_000 })
+// Max 20 retururi / oră / IP — generos pentru testare și clienți reali din același IP/firmă.
+const checkRateLimit = makeRateLimiter({ max: 20, windowMs: 60 * 60_000 })
 
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request)
