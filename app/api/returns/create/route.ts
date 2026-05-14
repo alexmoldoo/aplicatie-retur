@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     if (codeRedemptionRaw && !codeRedemption) {
       await logAudit({ action: 'create_return_invalid_code', ip, details: { reason: 'invalid_format' } })
       return NextResponse.json(
-        { success: false, message: 'Codul de retur are un format invalid.' },
+        { success: false, message: 'Cod invalid.' },
         { status: 400 }
       )
     }
@@ -303,7 +303,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             success: false,
-            message: 'Codul tocmai a fost folosit de altcineva. Te rugăm să reîmprospătezi pagina.',
+            message: 'Codul a fost deja folosit. Dacă tocmai ai trimis formularul, returul a fost creat deja — verifică emailul sau contactează magazinul.',
           },
           { status: 409 }
         )

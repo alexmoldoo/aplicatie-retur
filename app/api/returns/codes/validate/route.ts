@@ -49,14 +49,15 @@ export async function POST(request: NextRequest) {
   }
 
   const raw = typeof body.code === 'string' ? body.code : ''
-  const code = normalizeCode(raw)
+  const cleaned = raw.trim().toUpperCase().replace(/[^0-9A-Z]/g, '')
+  const code = normalizeCode(cleaned)
+  if (!cleaned) {
+    return NextResponse.json({ success: true, valid: false, message: 'Cod invalid.' })
+  }
   if (!code) {
+    // Format nu se potrivește, dar nu spunem asta utilizatorului — același mesaj ca pentru „inexistent".
     await logAudit({ action: 'code_check', ip, details: { result: 'format_invalid' } })
-    return NextResponse.json({
-      success: true,
-      valid: false,
-      message: 'Format cod invalid. Așteptat: 4 cifre + 1 literă (ex: 7392K) sau D + 4 cifre + 1 literă (ex: D7392K).',
-    })
+    return NextResponse.json({ success: true, valid: false, message: 'Cod invalid.' })
   }
 
   try {
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       recordFail(ip)
       await logAudit({ action: 'code_check', ip, details: { code, result: result.reason } })
       const messageByReason: Record<string, string> = {
-        not_found: 'Cod inexistent.',
+        not_found: 'Cod invalid.',
         inactive: 'Acest cod a fost dezactivat.',
         used: 'Acest cod a fost deja folosit.',
       }

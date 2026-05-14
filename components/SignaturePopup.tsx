@@ -39,6 +39,9 @@ export default function SignaturePopup({
   const [hasSignature, setHasSignature] = useState(false)
   const [pdfGenerated, setPdfGenerated] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  // Guard sincron împotriva dublu-submit. State-ul React e async — nu blochează
+  // două click-uri rapide înainte de re-render. `useRef` actualizează imediat.
+  const submitInFlight = useRef(false)
   const [awbNumber, setAwbNumber] = useState<string | null>(null)
   const [awbPdfUrl, setAwbPdfUrl] = useState<string | null>(null)
 
@@ -117,21 +120,25 @@ export default function SignaturePopup({
   }
 
   const generatePDF = async () => {
-    if (isGenerating) {
+    if (submitInFlight.current || isGenerating) {
       return
     }
-    
+    submitInFlight.current = true
+
     if (!orderData || !products || !refundData) {
+      submitInFlight.current = false
       alert('Date lipsă. Vă rugăm să vă întoarceți și să completați toți pașii.')
       return
     }
     
     if (!hasSignature) {
+      submitInFlight.current = false
       alert('Vă rugăm să semnați formularul înainte de a genera PDF-ul.')
       return
     }
-    
+
     if (typeof window === 'undefined') {
+      submitInFlight.current = false
       return
     }
 
@@ -239,9 +246,11 @@ export default function SignaturePopup({
 
       setPdfGenerated(true)
       setIsGenerating(false)
+      submitInFlight.current = false
     } catch (error) {
       console.error('Error generating PDF:', error)
       setIsGenerating(false)
+      submitInFlight.current = false
       alert(`Eroare la generarea PDF-ului: ${error instanceof Error ? error.message : 'Eroare necunoscută'}. Vă rugăm să încercați din nou.`)
     }
   }
