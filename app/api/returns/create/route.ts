@@ -358,6 +358,10 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      // SameDay refuză duplicate pe `client_internal_reference`, chiar dacă încercarea
+       // anterioară a picat downstream. Adăugăm un suffix random ca să fim sigur unic
+       // la fiecare submit (DB-ul nostru păstrează `idRetur` curat în `observation`).
+       const sameDayRef = `${idRetur}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
       try {
         const awbResult = await createReturnAWB({
           pickupAddress: {
@@ -370,7 +374,7 @@ export async function POST(request: NextRequest) {
             email: pickupContact.email,
           },
           packageInfo: { weight: 1, observation: `Retur ${idRetur}` },
-          reference: idRetur,
+          reference: sameDayRef,
         })
         awbNumber = awbResult.awbNumber
         awbPdfUrl = awbResult.awbPdfUrl
