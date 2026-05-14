@@ -8,7 +8,7 @@ import { getClientIp, makeRateLimiter, isAllowedOrigin, formatWaitTime } from '@
 import { isBlocked, recordFail } from '@/lib/ip-blocklist'
 import { createReturnAWB } from '@/lib/sameday'
 import { validateRomanianIBAN } from '@/lib/iban-validator'
-import { normalizeCode, validateCodeForRedemption, redeemCode, releaseCode, type CodeKind } from '@/lib/return-codes'
+import { normalizeCode, validateCodeForRedemption, redeemCode, releaseCode, linkCodeToReturn, type CodeKind } from '@/lib/return-codes'
 import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
@@ -46,8 +46,8 @@ async function getCurierCost(): Promise<number> {
 
 export const dynamic = 'force-dynamic'
 
-// Max 3 retururi / oră / IP — prevenția spam
-const checkRateLimit = makeRateLimiter({ max: 3, windowMs: 60 * 60_000 })
+// Max 20 retururi / oră / IP — generos pentru testare și clienți reali din același IP/firmă.
+const checkRateLimit = makeRateLimiter({ max: 20, windowMs: 60 * 60_000 })
 
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request)
@@ -496,6 +496,11 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.error('Failed to persist AWB number:', e)
       }
+    }
+
+    // Linkăm codul cu returul (FK satisfăcut acum că rândul există în `returns`).
+    if (codeWaiver && codeRedemption) {
+      await linkCodeToReturn(codeRedemption, newReturn.idRetur)
     }
 
     await logAudit({
