@@ -248,10 +248,12 @@ export default function SignaturePopup({
       setIsGenerating(false)
       submitInFlight.current = false
     } catch (error) {
-      console.error('Error generating PDF:', error)
+      console.error('Error generating return:', error)
       setIsGenerating(false)
       submitInFlight.current = false
-      alert(`Eroare la generarea PDF-ului: ${error instanceof Error ? error.message : 'Eroare necunoscută'}. Vă rugăm să încercați din nou.`)
+      // Mesajul de la server e deja contextual (ex: „Cod invalid.", „SameDay refuză AWB-ul...").
+      // Nu mai prefixăm cu „Eroare la generarea PDF-ului" — pică pe orice eroare, inclusiv 409 pe cod.
+      alert(error instanceof Error ? error.message : 'Eroare necunoscută. Vă rugăm să încercați din nou.')
     }
   }
 

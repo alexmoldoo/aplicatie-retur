@@ -88,7 +88,7 @@ export async function validateCodeForRedemption(code: string): Promise<Validatio
   // (kindFromCode derivă din prefixul codului).
   const { data, error } = await sb
     .from('return_codes')
-    .select('code, note, active, used_at')
+    .select('code, note, active, used_at, used_by_return_id')
     .eq('code', code)
     .maybeSingle()
 
@@ -98,8 +98,42 @@ export async function validateCodeForRedemption(code: string): Promise<Validatio
   }
   if (!data) return { valid: false, reason: 'not_found' }
   if (!data.active) return { valid: false, reason: 'inactive' }
-  if (data.used_at) return { valid: false, reason: 'used' }
+  if (data.used_at) {
+    // Self-heal: dacă rândul e marcat folosit dar returul linkat nu există
+    // (function timeout pe Vercel, AWB pică post-redeem etc.), eliberăm.
+    if (await tryReleaseStuckCode(code, data.used_by_return_id as string | null)) {
+      return { valid: true, kind: kindFromCode(data.code), note: data.note }
+    }
+    return { valid: false, reason: 'used' }
+  }
   return { valid: true, kind: kindFromCode(data.code), note: data.note }
+}
+
+/**
+ * Verifică dacă un cod „folosit" e de fapt blocat fără retur asociat
+ * (function timeout, AWB pică între redeem și insert). Dacă da, eliberează atomic.
+ * Returnează `true` doar dacă a eliberat efectiv.
+ */
+async function tryReleaseStuckCode(code: string, usedByReturnId: string | null): Promise<boolean> {
+  const sb = requireSupabase()
+  if (usedByReturnId) {
+    const { data: ret } = await sb
+      .from('returns')
+      .select('id_retur')
+      .eq('id_retur', usedByReturnId)
+      .maybeSingle()
+    if (ret) return false // retur legit există → codul e folosit cu adevărat
+  }
+  // Eliberează cu condiție optimistă: dacă între timp altcineva a setat used_by_return_id, nu suprascriem.
+  const filter = usedByReturnId
+    ? sb.from('return_codes').update({ used_at: null, used_by_return_id: null }).eq('code', code).eq('used_by_return_id', usedByReturnId)
+    : sb.from('return_codes').update({ used_at: null, used_by_return_id: null }).eq('code', code).is('used_by_return_id', null)
+  const { data, error } = await filter.select('code').maybeSingle()
+  if (error) {
+    console.error('[return-codes] release-stuck error:', error)
+    return false
+  }
+  return !!data
 }
 
 /**
@@ -109,7 +143,7 @@ export async function validateCodeForRedemption(code: string): Promise<Validatio
  */
 export async function redeemCode(code: string, returnId: string): Promise<boolean> {
   const sb = requireSupabase()
-  const { data, error } = await sb
+  const tryUpdate = async () => sb
     .from('return_codes')
     .update({
       used_at: new Date().toISOString(),
@@ -121,11 +155,33 @@ export async function redeemCode(code: string, returnId: string): Promise<boolea
     .select('code')
     .maybeSingle()
 
-  if (error) {
-    console.error('[return-codes] redeem error:', error)
+  const first = await tryUpdate()
+  if (first.error) {
+    console.error('[return-codes] redeem error:', first.error)
     return false
   }
-  return !!data
+  if (first.data) return true
+
+  // Niciun rând actualizat — verificăm starea exactă a rândului ca să știm DE CE.
+  const { data: row } = await sb
+    .from('return_codes')
+    .select('code, used_at, used_by_return_id, active')
+    .eq('code', code)
+    .maybeSingle()
+  console.warn('[return-codes] redeem missed for code:', code, 'row state:', row)
+  if (!row) return false
+  if (!row.active) return false
+  if (!row.used_at) {
+    // Bizar: filtrele inițiale n-au matchuit deși active=true și used_at=NULL.
+    // Reîncercăm o dată (poate a fost un glitch tranzitoriu).
+    const retry = await tryUpdate()
+    return !retry.error && !!retry.data
+  }
+  // used_at e setat — verificăm dacă e „stuck" (retur asociat inexistent).
+  const released = await tryReleaseStuckCode(code, row.used_by_return_id as string | null)
+  if (!released) return false
+  const retry = await tryUpdate()
+  return !retry.error && !!retry.data
 }
 
 /**
