@@ -141,13 +141,15 @@ async function tryReleaseStuckCode(code: string, usedByReturnId: string | null):
  * Returnează `true` doar dacă rândul a fost actualizat (winner-ul race-ului).
  * Loserul/codul invalid primește `false` și trebuie tratat de caller cu 409.
  */
-export async function redeemCode(code: string, returnId: string): Promise<boolean> {
+export async function redeemCode(code: string, _returnId: string): Promise<boolean> {
   const sb = requireSupabase()
+  // NU setăm `used_by_return_id` aici — există FK pe `returns(id_retur)` care
+  // pică pentru că returul n-a fost încă creat. Linkăm separat în `linkCodeToReturn`
+  // după ce `createReturn` reușește.
   const tryUpdate = async () => sb
     .from('return_codes')
     .update({
       used_at: new Date().toISOString(),
-      used_by_return_id: returnId,
     })
     .eq('code', code)
     .eq('active', true)
@@ -182,6 +184,24 @@ export async function redeemCode(code: string, returnId: string): Promise<boolea
   if (!released) return false
   const retry = await tryUpdate()
   return !retry.error && !!retry.data
+}
+
+/**
+ * Linkează un cod folosit cu returul nou-creat. Rulează DUPĂ `createReturn`
+ * ca să satisfacă FK-ul `returns(id_retur)`. Idempotent: dacă codul nu mai
+ * are used_at (release), nu schimbă nimic.
+ */
+export async function linkCodeToReturn(code: string, returnId: string): Promise<void> {
+  const sb = requireSupabase()
+  const { error } = await sb
+    .from('return_codes')
+    .update({ used_by_return_id: returnId })
+    .eq('code', code)
+    .not('used_at', 'is', null)
+    .is('used_by_return_id', null)
+  if (error) {
+    console.error('[return-codes] link error:', error)
+  }
 }
 
 /**
