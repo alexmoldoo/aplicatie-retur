@@ -289,26 +289,9 @@ export async function POST(request: NextRequest) {
     // Generează ID retur
     const idRetur = await generateReturnId()
 
-    // Redeem atomic codul ÎNAINTE de AWB. Dacă pierde race-ul → 409.
-    // Dacă pașii ulteriori (AWB / DB insert) pică, eliberăm codul ca să poată fi
-    // refolosit (vezi `releaseCode` în blocurile catch de mai jos).
-    if (codeWaiver && codeRedemption) {
-      const ok = await redeemCode(codeRedemption, idRetur)
-      if (!ok) {
-        await logAudit({
-          action: 'create_return_code_race',
-          ip,
-          details: { code: codeRedemption, returnId: idRetur },
-        })
-        return NextResponse.json(
-          {
-            success: false,
-            message: 'Codul a fost deja folosit. Dacă tocmai ai trimis formularul, returul a fost creat deja — verifică emailul sau contactează magazinul.',
-          },
-          { status: 409 }
-        )
-      }
-    }
+    // Codul se redeem-uiește JUST-IN-TIME, după AWB+PDF, chiar înainte de insert.
+    // Asta reduce dramatic fereastra în care codul rămâne „prins" fără retur asociat
+    // (de ex. dacă funcția Vercel iese în timeout în mijlocul AWB).
 
     // Obține baseUrl pentru generarea link-ului QR code
     const origin = request.headers.get('origin') || request.headers.get('host')
@@ -360,7 +343,6 @@ export async function POST(request: NextRequest) {
       if (!pickupContact.oras) missing.push('oraș')
       if (!pickupContact.judet) missing.push('județ')
       if (missing.length > 0) {
-        if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
         await logAudit({
           action: 'create_return_awb_fail',
           ip,
@@ -395,7 +377,6 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : 'unknown'
         console.error('SameDay AWB generation failed:', errMsg)
-        if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
         await logAudit({
           action: 'create_return_awb_fail',
           ip,
@@ -438,7 +419,6 @@ export async function POST(request: NextRequest) {
       await generateReturnPDF(tempReturn, qrCodeDataUrl)
     } catch (err) {
       console.error('PDF generation failed:', err)
-      if (codeWaiver && codeRedemption) await releaseCode(codeRedemption)
       return NextResponse.json(
         { success: false, message: 'Eroare la generarea PDF-ului. Încearcă din nou.' },
         { status: 500 }
@@ -462,6 +442,26 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.warn('Local PDF cache write skipped:', err)
         pdfPath = ''
+      }
+    }
+
+    // Redeem JIT — chiar înainte de insert. Astfel codul rămâne „liber" în DB
+    // pe toată durata AWB + PDF, și nu se „prinde" niciodată fără retur asociat.
+    if (codeWaiver && codeRedemption) {
+      const ok = await redeemCode(codeRedemption, idRetur)
+      if (!ok) {
+        await logAudit({
+          action: 'create_return_code_race',
+          ip,
+          details: { code: codeRedemption, returnId: idRetur },
+        })
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'Codul nu poate fi aplicat (a fost folosit sau dezactivat între timp). Te rugăm să încerci cu alt cod sau să contactezi suportul.',
+          },
+          { status: 409 }
+        )
       }
     }
 
