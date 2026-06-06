@@ -215,13 +215,9 @@ export default function PoliticaRetur() {
             retur sau comunicate de Maxari.
           </p>
 
-          <h3 style={h3}>7.1. Ridicare prin curierul indicat de Maxari</h3>
+          <h3 style={h3}>7.1. Curier Maxari</h3>
           <p style={{ marginBottom: '12px' }}>
-            Dacă această opțiune este disponibilă, clientul poate solicita ridicarea coletului
-            prin curierul indicat de Maxari.
-          </p>
-          <p style={{ marginBottom: '12px' }}>
-            Costul acestui serviciu este de <strong>19,99 RON</strong> și se deduce din suma
+            Costul este de <strong>19,99 RON</strong> și se scade din suma ce urmează a fi
             rambursată.
           </p>
           <p>
