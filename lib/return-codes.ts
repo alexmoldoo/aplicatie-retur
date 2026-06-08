@@ -375,7 +375,8 @@ export async function deleteCode(code: string): Promise<boolean> {
  * Citește codul folosit pe un anumit retur (pentru pagina detalii admin).
  */
 export async function findCodeByReturnId(returnId: string): Promise<{ code: string; kind: CodeKind; note: string | null } | null> {
-  const sb = requireSupabase()
+  if (!supabase) return null
+  const sb = supabase
   const { data, error } = await sb
     .from('return_codes')
     .select('code, kind, note')
