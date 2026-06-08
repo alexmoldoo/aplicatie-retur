@@ -43,6 +43,7 @@ export default function ReturnDetailsPage() {
   const [isEditMode, setIsEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editedData, setEditedData] = useState<ReturnData | null>(null)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
 
   const [statusSubmitting, setStatusSubmitting] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
@@ -264,6 +265,44 @@ export default function ReturnDetailsPage() {
       setTimeout(recalculateTotal, 100)
     }
   }
+
+  const handleCopy = async (text: string, field: string) => {
+    const showFeedback = () => {
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 1500)
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      showFeedback()
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      try {
+        document.execCommand('copy')
+        showFeedback()
+      } catch {}
+      document.body.removeChild(ta)
+    }
+  }
+
+  const copyBtnStyle = (active: boolean): React.CSSProperties => ({
+    padding: '10px 14px',
+    borderRadius: '8px',
+    backgroundColor: active ? '#4CAF50' : '#26a69a',
+    color: '#fff',
+    border: 'none',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    boxShadow: '0 2px 6px rgba(38, 166, 154, 0.25)',
+  })
 
   const getStatusColor = (status: string) => {
     switch (normalizeStatus(status)) {
@@ -1104,18 +1143,31 @@ export default function ReturnDetailsPage() {
                   }}
                 />
               ) : (
-                <div style={{
-                  padding: '10px',
-                  backgroundColor: '#fff',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 'bold',
-                  fontFamily: 'monospace',
-                  border: '1px solid #e0e0e0',
-                  minHeight: '40px',
-                  color: dataToDisplay.refundData.iban ? '#333' : '#999'
-                }}>
-                  {dataToDisplay.refundData.iban || '(necompletat)'}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <div style={{
+                    flex: 1,
+                    padding: '10px',
+                    backgroundColor: '#fff',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    fontFamily: 'monospace',
+                    border: '1px solid #e0e0e0',
+                    minHeight: '40px',
+                    color: dataToDisplay.refundData.iban ? '#333' : '#999',
+                    wordBreak: 'break-all',
+                  }}>
+                    {dataToDisplay.refundData.iban || '(necompletat)'}
+                  </div>
+                  {dataToDisplay.refundData.iban && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(dataToDisplay.refundData.iban!, 'iban')}
+                      style={copyBtnStyle(copiedField === 'iban')}
+                    >
+                      {copiedField === 'iban' ? '✓ Copiat' : 'Copiază'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1150,21 +1202,73 @@ export default function ReturnDetailsPage() {
                   }}
                 />
               ) : (
-                <div style={{
-                  padding: '10px',
-                  backgroundColor: '#fff',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 'bold',
-                  border: '1px solid #e0e0e0',
-                  minHeight: '40px',
-                  color: dataToDisplay.refundData.numeTitular ? '#333' : '#999'
-                }}>
-                  {dataToDisplay.refundData.numeTitular || '(necompletat)'}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <div style={{
+                    flex: 1,
+                    padding: '10px',
+                    backgroundColor: '#fff',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    border: '1px solid #e0e0e0',
+                    minHeight: '40px',
+                    color: dataToDisplay.refundData.numeTitular ? '#333' : '#999',
+                  }}>
+                    {dataToDisplay.refundData.numeTitular || '(necompletat)'}
+                  </div>
+                  {dataToDisplay.refundData.numeTitular && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(dataToDisplay.refundData.numeTitular!, 'nume_titular')}
+                      style={copyBtnStyle(copiedField === 'nume_titular')}
+                    >
+                      {copiedField === 'nume_titular' ? '✓ Copiat' : 'Copiază'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           </div>
+
+          {!isEditMode && dataToDisplay.numarComanda && (() => {
+            const orderNoClean = dataToDisplay.numarComanda.replace(/^#/, '')
+            const paymentText = `Plata retur nr comanda ${orderNoClean}`
+            return (
+              <div style={{ marginTop: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '6px',
+                  fontWeight: 'bold'
+                }}>
+                  Detalii plată
+                </label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <div style={{
+                    flex: 1,
+                    padding: '10px',
+                    backgroundColor: '#fff',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    border: '1px solid #e0e0e0',
+                    minHeight: '40px',
+                    color: '#333',
+                  }}>
+                    {paymentText}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(paymentText, 'payment_details')}
+                    style={copyBtnStyle(copiedField === 'payment_details')}
+                  >
+                    {copiedField === 'payment_details' ? '✓ Copiat' : 'Copiază'}
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         {/* AWB și documente */}
