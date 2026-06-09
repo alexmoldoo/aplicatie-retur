@@ -44,6 +44,12 @@ export default function SignaturePopup({
   const submitInFlight = useRef(false)
   const [awbNumber, setAwbNumber] = useState<string | null>(null)
   const [awbPdfUrl, setAwbPdfUrl] = useState<string | null>(null)
+  // Păstrăm blob-ul PDF în memorie ca să poată fi redescărcat sau retrimis prin
+  // share sheet după ce userul a închis flow-ul inițial. Util pe desktop unde
+  // share-ul nu se deschide automat și pe mobil dacă userul anulează share-ul.
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null)
+  const [pdfFileName, setPdfFileName] = useState<string>('')
+  const [canShareGenerated, setCanShareGenerated] = useState(false)
 
   // Sume calculate pentru rezumat
   const selectedItems = products.filter(p => p.selected && (p.cantitateReturnata || 0) > 0)
@@ -220,6 +226,10 @@ export default function SignaturePopup({
         share?: (data: { files: File[]; title?: string; text?: string }) => Promise<void>
       }
       const canShareFiles = !!(nav.canShare && nav.canShare({ files: [pdfFile] }) && nav.share)
+
+      setPdfBlob(pdfBlob)
+      setPdfFileName(fileName)
+      setCanShareGenerated(canShareFiles)
 
       if (canShareFiles) {
         try {
@@ -514,8 +524,67 @@ export default function SignaturePopup({
               color: '#2e7d32',
               marginBottom: '12px'
             }}>
-              ✅ Formularul a fost generat și descărcat.
+              ✅ Formularul a fost generat.
             </p>
+
+            {pdfBlob && (
+              <div style={{
+                display: 'flex',
+                gap: 8,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                marginBottom: 14,
+              }}>
+                <button
+                  onClick={() => triggerBrowserDownload(pdfBlob, pdfFileName)}
+                  style={{
+                    padding: '10px 16px',
+                    borderRadius: 8,
+                    background: '#26a69a',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ⬇ Descarcă PDF
+                </button>
+                {canShareGenerated && (
+                  <button
+                    onClick={async () => {
+                      const file = new File([pdfBlob], pdfFileName, { type: 'application/pdf' })
+                      const nav = navigator as Navigator & {
+                        share?: (data: { files: File[]; title?: string; text?: string }) => Promise<void>
+                      }
+                      try {
+                        await nav.share!({
+                          files: [file],
+                          title: `Retur ${pdfFileName.replace(/\.pdf$/, '')}`,
+                          text: `Formular retur ${pdfFileName.replace(/\.pdf$/, '')}`,
+                        })
+                      } catch (err: any) {
+                        if (err?.name !== 'AbortError') {
+                          console.warn('Share failed:', err)
+                        }
+                      }
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: 8,
+                      background: '#fff',
+                      color: '#26a69a',
+                      border: '1px solid #26a69a',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ↗ Trimite mai departe
+                  </button>
+                )}
+              </div>
+            )}
 
             {awbNumber && (
               <div style={{
