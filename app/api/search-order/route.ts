@@ -146,6 +146,68 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // DEV ONLY — comandă de test pentru verificarea fluxului fără Shopify.
+    // Gate strict pe non-producție: `TESTCARD` = plată cu card (fără IBAN),
+    // `TESTIBAN` = ramburs/transfer (cere IBAN). Niciodată activ în producție.
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      typeof orderNumber === 'string' &&
+      /^TEST(CARD|IBAN)$/i.test(orderNumber.trim())
+    ) {
+      const isCard = /card/i.test(orderNumber)
+      const numar = isCard ? '#TESTCARD' : '#TESTIBAN'
+      const now = new Date().toISOString()
+      const testOrder = {
+        id: 999000001,
+        nume: 'Client Test',
+        numarComanda: numar,
+        telefon: '0712345678',
+        email: 'test@local.dev',
+        shippingAddress: {
+          nume: 'Client Test',
+          telefon: '0712345678',
+          strada: 'Str. Test 1',
+          oras: 'Bucuresti',
+          judet: 'Bucuresti',
+          codPostal: '010101',
+          tara: 'Romania',
+        },
+        paymentMethod: isCard ? 'shopify_payments' : 'Cash on Delivery (COD)',
+        wasPaidWithCard: isCard,
+        products: [
+          {
+            id: 'test-line-1',
+            nume: 'Produs Test A',
+            cantitate: 1,
+            pret: 99.99,
+            pretInitial: 99.99,
+            discount: 0,
+            variant_id: 'v1',
+            product_id: 'p1',
+            sku: 'TEST-A',
+            variant_title: '',
+            imagine: '',
+          },
+        ],
+        total: 99.99,
+        currency: 'RON',
+        dataComanda: now,
+        eligibility: calculateEligibility(now),
+        sessionToken: createCustomerToken({
+          orderId: '999000001',
+          numarComanda: numar,
+          nume: 'Client Test',
+          wasPaidWithCard: isCard,
+        }),
+        existingReturn: null,
+      }
+      return NextResponse.json({
+        success: true,
+        orders: [testOrder],
+        message: `Comandă de test (local) — ${isCard ? 'plată card' : 'ramburs'}.`,
+      })
+    }
+
     console.log('Search order request:', {
       orderNumber: orderNumber || 'none',
       phone: phone || 'none',
@@ -384,6 +446,7 @@ export async function POST(request: NextRequest) {
           orderId: String(order.id),
           numarComanda: order.numarComanda,
           nume: order.nume || '',
+          wasPaidWithCard: order.wasPaidWithCard === true,
         }),
       }))
 

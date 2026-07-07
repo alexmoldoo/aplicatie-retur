@@ -12,7 +12,7 @@ interface ReturnItem {
   idRetur: string
   numarComanda: string
   status: string
-  totalRambursare?: number
+  totalRefund?: number
   createdAt?: string
   orderData?: { nume?: string }
 }

@@ -172,8 +172,12 @@ export async function generateReturnPDF(
 
   // RIGHT COL — refund + sumar
   yR = cardTitle('Date rambursare', xR, yR)
-  yR = kv('IBAN:', returnData.refundData.iban || '-', xR, yR)
-  yR = kv('Titular:', returnData.refundData.numeTitular || '-', xR, yR)
+  if (returnData.refundData.metodaRambursare === 'card') {
+    yR = kv('Metoda:', 'Refund pe cardul original', xR, yR)
+  } else {
+    yR = kv('IBAN:', returnData.refundData.iban || '-', xR, yR)
+    yR = kv('Titular:', returnData.refundData.numeTitular || '-', xR, yR)
+  }
 
   yR += 3
   yR = cardTitle('Sumar financiar', xR, yR)

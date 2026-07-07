@@ -115,7 +115,10 @@ export interface Product {
 }
 
 export interface RefundData {
-  iban?: string // Doar IBAN și numeTitular (fără metodaRambursare)
+  // 'card' = refund pe cardul original (fără IBAN); 'cont' = transfer bancar (cu IBAN).
+  // Determinat server-side din tokenul de sesiune, nu din client.
+  metodaRambursare?: 'card' | 'cont'
+  iban?: string // Completat doar când metodaRambursare === 'cont'
   numeTitular?: string
   // Metoda de expediere a coletului către magazin (din Pas 5)
   metodaTrimitere?: 'curier' | 'manual'

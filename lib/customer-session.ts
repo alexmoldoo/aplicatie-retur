@@ -30,6 +30,10 @@ export interface CustomerSessionPayload {
   orderId: string
   numarComanda: string
   nume: string
+  // Sursă de adevăr server-side pentru metoda de rambursare: dacă a fost plată
+  // cu card, refund-ul merge pe card și NU cerem IBAN la creare. Semnat HMAC,
+  // deci clientul nu poate falsifica (vezi /api/returns/create).
+  wasPaidWithCard: boolean
   expiresAt: number
 }
 
