@@ -43,11 +43,16 @@ CREATE TABLE app_config (
   shopify_access_token TEXT DEFAULT '',
   shop_title TEXT DEFAULT '',
   excluded_skus JSONB DEFAULT '[]'::jsonb,
+  eligibility_overrides JSONB DEFAULT '[]'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Inserează configurația inițială
 INSERT INTO app_config (id) VALUES (gen_random_uuid());
+
+-- MIGRARE (dacă tabelul app_config există deja fără această coloană):
+-- rulează o singură dată în Supabase → SQL Editor.
+ALTER TABLE app_config ADD COLUMN IF NOT EXISTS eligibility_overrides JSONB DEFAULT '[]'::jsonb;
 
 -- Tabel retururi
 CREATE TABLE returns (

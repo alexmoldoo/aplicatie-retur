@@ -19,6 +19,7 @@ interface ReturnData {
     motivRetur: string
   }>
   refundData: {
+    metodaRambursare?: 'card' | 'cont'
     iban?: string
     numeTitular?: string
   }
@@ -1107,6 +1108,23 @@ export default function ReturnDetailsPage() {
           }}>
             Date rambursare
           </h2>
+          {dataToDisplay.refundData.metodaRambursare === 'card' && !isEditMode ? (
+            <div style={{
+              padding: '16px',
+              backgroundColor: '#e8f5e9',
+              border: '1px solid #a5d6a7',
+              borderRadius: '10px',
+              color: '#2e7d32',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <span style={{ fontSize: '20px' }}>💳</span>
+              Plată cu cardul — banii se întorc automat pe cardul original. Nu e nevoie de IBAN.
+            </div>
+          ) : (
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
@@ -1229,6 +1247,7 @@ export default function ReturnDetailsPage() {
               )}
             </div>
           </div>
+          )}
 
           {!isEditMode && dataToDisplay.numarComanda && (() => {
             const orderNoClean = dataToDisplay.numarComanda.replace(/^#/, '')

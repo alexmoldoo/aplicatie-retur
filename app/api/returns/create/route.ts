@@ -132,6 +132,11 @@ export async function POST(request: NextRequest) {
     // NU mai trimite produsul. Sărim AWB, ignorăm metodaTrimitere, totalRefund = subtotal.
     const isDirectRefund = codeKind === 'direct_refund'
 
+    // Metoda de rambursare vine din tokenul de sesiune (semnat server-side la Pas 1),
+    // NU din client — altfel cineva ar putea sări validarea IBAN mințind „card".
+    // Card = banii merg pe cardul original, deci NU cerem IBAN / titular.
+    // (verificat mai jos, după ce validăm tokenul)
+
     // 3. Verificare token de sesiune (emis în Pas 1)
     const session = verifyCustomerToken(sessionToken)
     if (!session) {
@@ -163,6 +168,9 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       )
     }
+
+    // Card = refund pe cardul original. Sursa de adevăr e tokenul semnat, nu clientul.
+    const isCardRefund = session.wasPaidWithCard === true
 
     // 5. Validare date
     if (!orderData || !products || !refundData || !signature) {
@@ -207,21 +215,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validare IBAN (același validator ca în UI)
-    const ibanCheck = validateRomanianIBAN(refundData.iban || '')
-    if (!ibanCheck.valid) {
-      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_iban' } })
-      return NextResponse.json(
-        { success: false, message: ibanCheck.error || 'IBAN invalid.' },
-        { status: 400 }
-      )
-    }
-    if (!refundData.numeTitular || refundData.numeTitular.trim().length < 2) {
-      await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_holder' } })
-      return NextResponse.json(
-        { success: false, message: 'Numele titularului este obligatoriu.' },
-        { status: 400 }
-      )
+    // Validare IBAN + titular — DOAR pentru transfer bancar.
+    // La plata cu cardul refund-ul merge pe card, deci nu cerem aceste date.
+    if (!isCardRefund) {
+      const ibanCheck = validateRomanianIBAN(refundData.iban || '')
+      if (!ibanCheck.valid) {
+        await logAudit({ action: 'create_return_fail', ip, details: { reason: 'invalid_iban' } })
+        return NextResponse.json(
+          { success: false, message: ibanCheck.error || 'IBAN invalid.' },
+          { status: 400 }
+        )
+      }
+      if (!refundData.numeTitular || refundData.numeTitular.trim().length < 2) {
+        await logAudit({ action: 'create_return_fail', ip, details: { reason: 'missing_holder' } })
+        return NextResponse.json(
+          { success: false, message: 'Numele titularului este obligatoriu.' },
+          { status: 400 }
+        )
+      }
     }
 
     // Calculare subtotal produse (fără cost transport)
@@ -307,11 +318,13 @@ export async function POST(request: NextRequest) {
       numarComanda: orderData.numarComanda,
     }
 
-    // Pregătește refundData doar cu IBAN și numeTitular (fără metodaRambursare)
-    // + datele de expediere alese în Pas 5
+    // Pregătește refundData + datele de expediere alese în Pas 5.
+    // Card → refund pe card, fără IBAN/titular. Cont → transfer bancar cu IBAN.
     const refundDataForReturn: RefundData = {
-      iban: refundData.iban,
-      numeTitular: refundData.numeTitular,
+      metodaRambursare: isCardRefund ? 'card' : 'cont',
+      ...(isCardRefund
+        ? {}
+        : { iban: refundData.iban, numeTitular: refundData.numeTitular }),
       metodaTrimitere,
       costTransport,
       subtotalProduse,

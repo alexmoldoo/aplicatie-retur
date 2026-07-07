@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { getCurrentUserFromCookies } from '@/lib/auth'
-import { getConfig, updateShopifyConfig, updateExcludedSKUs } from '@/lib/db'
+import { getConfig, updateShopifyConfig, updateExcludedSKUs, updateEligibilityOverrides } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -35,6 +35,7 @@ export async function GET() {
           clientSecretConfigured: config.shopify.clientSecret.length > 0,
         },
         excludedSKUs: config.excludedSKUs,
+        eligibilityOverrides: config.eligibilityOverrides,
       },
     })
   } catch (error) {
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { shopify, excludedSKUs } = body
+    const { shopify, excludedSKUs, eligibilityOverrides } = body
 
     // Obține configurația existentă pentru a păstra datele
     const currentConfig = await getConfig()
@@ -80,6 +81,10 @@ export async function POST(request: NextRequest) {
 
     if (excludedSKUs !== undefined) {
       await updateExcludedSKUs(excludedSKUs)
+    }
+
+    if (eligibilityOverrides !== undefined) {
+      await updateEligibilityOverrides(eligibilityOverrides)
     }
 
     return NextResponse.json({
