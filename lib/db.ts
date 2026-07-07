@@ -90,6 +90,17 @@ export interface ShopifyConfig {
 export interface AppConfig {
   shopify: ShopifyConfig
   excludedSKUs: string[]
+  // Numere de comandă deblocate manual din admin — trec de termenul de retur expirat.
+  // Stocate normalizat (fără „#", uppercase). Vezi normalizeOrderNumber().
+  eligibilityOverrides: string[]
+}
+
+/**
+ * Normalizează un număr de comandă pentru comparație tolerantă:
+ * scoate spațiile și „#", uppercase. „#MX22222" și „mx22222" → „MX22222".
+ */
+export function normalizeOrderNumber(s: string): string {
+  return (s || '').replace(/\s/g, '').replace(/^#/, '').toUpperCase()
 }
 
 // Interfețe pentru retururi
@@ -356,6 +367,7 @@ export async function getConfig(): Promise<AppConfig> {
           shopTitle: '',
         },
         excludedSKUs: [],
+        eligibilityOverrides: [],
       }
     }
 
@@ -368,6 +380,7 @@ export async function getConfig(): Promise<AppConfig> {
         shopTitle: data.shop_title || '',
       },
       excludedSKUs: (data.excluded_skus as string[]) || [],
+      eligibilityOverrides: (data.eligibility_overrides as string[]) || [],
     }
   }
   
@@ -384,6 +397,7 @@ export async function getConfig(): Promise<AppConfig> {
         shopTitle: parsed.shopify?.shopTitle || '',
       },
       excludedSKUs: parsed.excludedSKUs || [],
+      eligibilityOverrides: parsed.eligibilityOverrides || [],
     }
   } catch (error) {
     return {
@@ -395,6 +409,7 @@ export async function getConfig(): Promise<AppConfig> {
         shopTitle: '',
       },
       excludedSKUs: [],
+      eligibilityOverrides: [],
     }
   }
 }
@@ -502,6 +517,52 @@ export async function updateExcludedSKUs(skus: string[]): Promise<void> {
   // Fallback la JSON
   const config = await getConfig()
   config.excludedSKUs = skus
+  saveConfig(config)
+}
+
+/**
+ * Actualizează lista comenzilor deblocate manual (override termen retur expirat).
+ * Valorile se stochează normalizat (vezi normalizeOrderNumber).
+ */
+export async function updateEligibilityOverrides(orders: string[]): Promise<void> {
+  const normalized = Array.from(new Set(orders.map(normalizeOrderNumber).filter(Boolean)))
+  if (supabase) {
+    const { data: existing } = await supabase
+      .from('app_config')
+      .select('id')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (existing) {
+      const { error } = await supabase
+        .from('app_config')
+        .update({
+          eligibility_overrides: normalized,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+
+      if (error) {
+        throw new Error('Eroare la actualizarea deblocărilor: ' + error.message)
+      }
+    } else {
+      const { error } = await supabase
+        .from('app_config')
+        .insert({
+          eligibility_overrides: normalized,
+        })
+
+      if (error) {
+        throw new Error('Eroare la crearea configurației: ' + error.message)
+      }
+    }
+    return
+  }
+
+  // Fallback la JSON
+  const config = await getConfig()
+  config.eligibilityOverrides = normalized
   saveConfig(config)
 }
 

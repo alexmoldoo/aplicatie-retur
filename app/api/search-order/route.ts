@@ -8,7 +8,8 @@ import {
   getShopifyAccessToken,
 } from '@/lib/shopify'
 import { calculateEligibility } from '@/lib/eligibility'
-import { getConfig, findReturnByOrderNumber } from '@/lib/db'
+import { getConfig, findReturnByOrderNumber, normalizeOrderNumber } from '@/lib/db'
+import { isDevTestOrderNumber, buildDevTestOrder } from '@/lib/dev-test-orders'
 import { matchNames } from '@/lib/name-matcher'
 import { createCustomerToken } from '@/lib/customer-session'
 import { logAudit } from '@/lib/audit'
@@ -147,64 +148,15 @@ export async function POST(request: NextRequest) {
     }
 
     // DEV ONLY — comandă de test pentru verificarea fluxului fără Shopify.
-    // Gate strict pe non-producție: `TESTCARD` = plată cu card (fără IBAN),
-    // `TESTIBAN` = ramburs/transfer (cere IBAN). Niciodată activ în producție.
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      typeof orderNumber === 'string' &&
-      /^TEST(CARD|IBAN)$/i.test(orderNumber.trim())
-    ) {
-      const isCard = /card/i.test(orderNumber)
-      const numar = isCard ? '#TESTCARD' : '#TESTIBAN'
-      const now = new Date().toISOString()
-      const testOrder = {
-        id: 999000001,
-        nume: 'Client Test',
-        numarComanda: numar,
-        telefon: '0712345678',
-        email: 'test@local.dev',
-        shippingAddress: {
-          nume: 'Client Test',
-          telefon: '0712345678',
-          strada: 'Str. Test 1',
-          oras: 'Bucuresti',
-          judet: 'Bucuresti',
-          codPostal: '010101',
-          tara: 'Romania',
-        },
-        paymentMethod: isCard ? 'shopify_payments' : 'Cash on Delivery (COD)',
-        wasPaidWithCard: isCard,
-        products: [
-          {
-            id: 'test-line-1',
-            nume: 'Produs Test A',
-            cantitate: 1,
-            pret: 99.99,
-            pretInitial: 99.99,
-            discount: 0,
-            variant_id: 'v1',
-            product_id: 'p1',
-            sku: 'TEST-A',
-            variant_title: '',
-            imagine: '',
-          },
-        ],
-        total: 99.99,
-        currency: 'RON',
-        dataComanda: now,
-        eligibility: calculateEligibility(now),
-        sessionToken: createCustomerToken({
-          orderId: '999000001',
-          numarComanda: numar,
-          nume: 'Client Test',
-          wasPaidWithCard: isCard,
-        }),
-        existingReturn: null,
-      }
+    // (TESTCARD / TESTIBAN / TESTEXPIRED — vezi lib/dev-test-orders.ts)
+    if (isDevTestOrderNumber(orderNumber)) {
+      const testCfg = await getConfig()
+      const testOrder = buildDevTestOrder(orderNumber, testCfg.eligibilityOverrides)
+      const kind = /expired/i.test(orderNumber) ? 'expirată' : /card/i.test(orderNumber) ? 'plată card' : 'ramburs'
       return NextResponse.json({
         success: true,
         orders: [testOrder],
-        message: `Comandă de test (local) — ${isCard ? 'plată card' : 'ramburs'}.`,
+        message: `Comandă de test (local) — ${kind}.`,
       })
     }
 
@@ -438,17 +390,28 @@ export async function POST(request: NextRequest) {
         // Nu blocăm fluxul dacă imaginile eșuează
         console.warn('Image enrichment failed:', e)
       }
+      // Comenzi deblocate manual din admin — trec de termenul expirat.
+      const overrides = new Set((config.eligibilityOverrides || []).map(normalizeOrderNumber))
+
       // Adaugă eligibilitatea și token de sesiune
-      const convertedOrders = baseOrders.map(order => ({
-        ...order,
-        eligibility: calculateEligibility(order.dataComanda),
-        sessionToken: createCustomerToken({
-          orderId: String(order.id),
-          numarComanda: order.numarComanda,
-          nume: order.nume || '',
-          wasPaidWithCard: order.wasPaidWithCard === true,
-        }),
-      }))
+      const convertedOrders = baseOrders.map(order => {
+        const baseElig = calculateEligibility(order.dataComanda)
+        const isUnblocked = overrides.has(normalizeOrderNumber(order.numarComanda))
+        // Deblocat manual → forțăm „eligibil", păstrând un flag ca UI-ul să poată marca „deblocat".
+        const eligibility = isUnblocked
+          ? { ...baseElig, status: 'eligible' as const, overridden: true }
+          : baseElig
+        return {
+          ...order,
+          eligibility,
+          sessionToken: createCustomerToken({
+            orderId: String(order.id),
+            numarComanda: order.numarComanda,
+            nume: order.nume || '',
+            wasPaidWithCard: order.wasPaidWithCard === true,
+          }),
+        }
+      })
 
       // Sortează: comenzile eligibile primul, apoi celelalte
       convertedOrders.sort((a, b) => {
