@@ -87,13 +87,22 @@ export interface ShopifyConfig {
   shopTitle: string
 }
 
+export interface SmartbillConfig {
+  email: string // emailul contului SmartBill
+  token: string // token API (SmartBill → Contul meu → Integrări)
+  cif: string // CIF-ul firmei (companyVatCode), ex. RO12345678
+}
+
 export interface AppConfig {
   shopify: ShopifyConfig
   excludedSKUs: string[]
   // Numere de comandă deblocate manual din admin — trec de termenul de retur expirat.
   // Stocate normalizat (fără „#", uppercase). Vezi normalizeOrderNumber().
   eligibilityOverrides: string[]
+  smartbill: SmartbillConfig
 }
+
+const EMPTY_SMARTBILL: SmartbillConfig = { email: '', token: '', cif: '' }
 
 /**
  * Normalizează un număr de comandă pentru comparație tolerantă:
@@ -131,6 +140,12 @@ export interface RefundData {
   metodaRambursare?: 'card' | 'cont'
   iban?: string // Completat doar când metodaRambursare === 'cont'
   numeTitular?: string
+  // Factura SmartBill asociată comenzii + stornarea ei (setate din admin, la storno).
+  factura?: {
+    serie: string
+    numar: string
+    storno?: { serie: string; numar: string; data: string }
+  }
   // Metoda de expediere a coletului către magazin (din Pas 5)
   metodaTrimitere?: 'curier' | 'manual'
   costTransport?: number   // 0 manual, 15.99 curier
@@ -368,6 +383,7 @@ export async function getConfig(): Promise<AppConfig> {
         },
         excludedSKUs: [],
         eligibilityOverrides: [],
+        smartbill: { ...EMPTY_SMARTBILL },
       }
     }
 
@@ -381,6 +397,11 @@ export async function getConfig(): Promise<AppConfig> {
       },
       excludedSKUs: (data.excluded_skus as string[]) || [],
       eligibilityOverrides: (data.eligibility_overrides as string[]) || [],
+      smartbill: {
+        email: (data.smartbill as any)?.email || '',
+        token: (data.smartbill as any)?.token || '',
+        cif: (data.smartbill as any)?.cif || '',
+      },
     }
   }
   
@@ -398,6 +419,11 @@ export async function getConfig(): Promise<AppConfig> {
       },
       excludedSKUs: parsed.excludedSKUs || [],
       eligibilityOverrides: parsed.eligibilityOverrides || [],
+      smartbill: {
+        email: parsed.smartbill?.email || '',
+        token: parsed.smartbill?.token || '',
+        cif: parsed.smartbill?.cif || '',
+      },
     }
   } catch (error) {
     return {
@@ -410,6 +436,7 @@ export async function getConfig(): Promise<AppConfig> {
       },
       excludedSKUs: [],
       eligibilityOverrides: [],
+      smartbill: { ...EMPTY_SMARTBILL },
     }
   }
 }
@@ -517,6 +544,37 @@ export async function updateExcludedSKUs(skus: string[]): Promise<void> {
   // Fallback la JSON
   const config = await getConfig()
   config.excludedSKUs = skus
+  saveConfig(config)
+}
+
+/**
+ * Actualizează configurația SmartBill (email + token API + CIF).
+ */
+export async function updateSmartbillConfig(cfg: SmartbillConfig): Promise<void> {
+  if (supabase) {
+    const { data: existing } = await supabase
+      .from('app_config')
+      .select('id')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (existing) {
+      const { error } = await supabase
+        .from('app_config')
+        .update({ smartbill: cfg, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+      if (error) throw new Error('Eroare la salvarea SmartBill: ' + error.message)
+    } else {
+      const { error } = await supabase.from('app_config').insert({ smartbill: cfg })
+      if (error) throw new Error('Eroare la crearea configurației: ' + error.message)
+    }
+    return
+  }
+
+  // Fallback la JSON
+  const config = await getConfig()
+  config.smartbill = cfg
   saveConfig(config)
 }
 

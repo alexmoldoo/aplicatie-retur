@@ -44,15 +44,17 @@ CREATE TABLE app_config (
   shop_title TEXT DEFAULT '',
   excluded_skus JSONB DEFAULT '[]'::jsonb,
   eligibility_overrides JSONB DEFAULT '[]'::jsonb,
+  smartbill JSONB DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Inserează configurația inițială
 INSERT INTO app_config (id) VALUES (gen_random_uuid());
 
--- MIGRARE (dacă tabelul app_config există deja fără această coloană):
+-- MIGRARE (dacă tabelul app_config există deja fără aceste coloane):
 -- rulează o singură dată în Supabase → SQL Editor.
 ALTER TABLE app_config ADD COLUMN IF NOT EXISTS eligibility_overrides JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE app_config ADD COLUMN IF NOT EXISTS smartbill JSONB DEFAULT '{}'::jsonb;
 
 -- Tabel retururi
 CREATE TABLE returns (
