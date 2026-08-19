@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { getCurrentUserFromCookies } from '@/lib/auth'
-import { getConfig, updateShopifyConfig, updateExcludedSKUs, updateEligibilityOverrides } from '@/lib/db'
+import { getConfig, updateShopifyConfig, updateExcludedSKUs, updateEligibilityOverrides, updateSmartbillConfig } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -36,6 +36,11 @@ export async function GET() {
         },
         excludedSKUs: config.excludedSKUs,
         eligibilityOverrides: config.eligibilityOverrides,
+        smartbill: {
+          email: config.smartbill.email,
+          cif: config.smartbill.cif,
+          tokenConfigured: config.smartbill.token.length > 0,
+        },
       },
     })
   } catch (error) {
@@ -63,7 +68,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { shopify, excludedSKUs, eligibilityOverrides } = body
+    const { shopify, excludedSKUs, eligibilityOverrides, smartbill } = body
 
     // Obține configurația existentă pentru a păstra datele
     const currentConfig = await getConfig()
@@ -85,6 +90,15 @@ export async function POST(request: NextRequest) {
 
     if (eligibilityOverrides !== undefined) {
       await updateEligibilityOverrides(eligibilityOverrides)
+    }
+
+    if (smartbill) {
+      // Păstrează valorile existente când câmpurile vin goale (ex. token mascat)
+      await updateSmartbillConfig({
+        email: smartbill.email || currentConfig.smartbill.email || '',
+        token: smartbill.token || currentConfig.smartbill.token || '',
+        cif: smartbill.cif || currentConfig.smartbill.cif || '',
+      })
     }
 
     return NextResponse.json({

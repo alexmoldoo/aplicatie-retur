@@ -24,6 +24,12 @@ export default function ShopifyPage() {
   const [excludedSKUs, setExcludedSKUs] = useState<string[]>([])
   const [newSKU, setNewSKU] = useState('')
 
+  // SmartBill (stornare facturi la retur)
+  const [sbEmail, setSbEmail] = useState('')
+  const [sbToken, setSbToken] = useState('')
+  const [sbCif, setSbCif] = useState('')
+  const [sbTokenConfigured, setSbTokenConfigured] = useState(false)
+
   useEffect(() => {
     loadConfig()
   }, [])
@@ -36,6 +42,10 @@ export default function ShopifyPage() {
         setShopifyDomain(data.config.shopify.domain || '')
         setShopTitle(data.config.shopify.shopTitle || '')
         setExcludedSKUs(data.config.excludedSKUs || [])
+
+        setSbEmail(data.config.smartbill?.email || '')
+        setSbCif(data.config.smartbill?.cif || '')
+        setSbTokenConfigured(!!data.config.smartbill?.tokenConfigured)
 
         const cidOk = !!data.config.shopify.clientIdConfigured
         const csOk = !!data.config.shopify.clientSecretConfigured
@@ -99,6 +109,41 @@ export default function ShopifyPage() {
         setShopifyClientId('')
         setShopifyClientSecret('')
         setShopifyAccessToken('')
+        loadConfig()
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        setError(data.message || 'Eroare la salvare')
+      }
+    } catch {
+      setError('Eroare la conectare.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSaveSmartbill = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setSuccess(null)
+
+    if (!sbEmail || !sbCif || (!sbToken && !sbTokenConfigured)) {
+      setError('Completează email, token API și CIF pentru SmartBill.')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          smartbill: { email: sbEmail, token: sbToken, cif: sbCif },
+        }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        setSuccess('Configurație SmartBill salvată cu succes!')
+        setSbToken('')
         loadConfig()
         setTimeout(() => setSuccess(null), 3000)
       } else {
@@ -291,6 +336,65 @@ export default function ShopifyPage() {
           </form>
         )}
       </div>
+
+      <form onSubmit={handleSaveSmartbill}>
+        <div className={s.card}>
+          <div className={s.cardHeader}>
+            <h2 className={s.cardTitle}>SmartBill</h2>
+          </div>
+          <p className={s.cardSubtitle} style={{ marginBottom: 'var(--space-4)' }}>
+            Folosit pentru stornarea facturii la retur. Token-ul se generează din SmartBill →
+            Contul meu → Integrări → API.
+          </p>
+
+          <div className={`${s.fieldRow} ${s.fieldRow2}`}>
+            <div className={s.field}>
+              <label className={s.label}>Email cont SmartBill *</label>
+              <input
+                type="email"
+                value={sbEmail}
+                onChange={(e) => setSbEmail(e.target.value)}
+                placeholder="email@firma.ro"
+                className={s.input}
+              />
+            </div>
+            <div className={s.field}>
+              <label className={s.label}>CIF firmă *</label>
+              <input
+                type="text"
+                value={sbCif}
+                onChange={(e) => setSbCif(e.target.value)}
+                placeholder="RO12345678"
+                className={s.input}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+
+          <div className={s.field}>
+            <label className={s.label}>
+              Token API {sbTokenConfigured && <span style={{ color: 'var(--color-success)', fontWeight: 'var(--font-weight-normal)' }}>· configurat ✓</span>}
+            </label>
+            <input
+              type="password"
+              value={sbToken}
+              onChange={(e) => setSbToken(e.target.value)}
+              placeholder={sbTokenConfigured ? '••••••••••' : 'token din SmartBill'}
+              className={s.input}
+              style={{ fontFamily: 'monospace' }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className={`${s.btn} ${s.btnPrimary} ${s.btnFull}`}
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            {saving ? 'Se salvează…' : 'Salvează SmartBill'}
+          </button>
+        </div>
+      </form>
 
       <form onSubmit={handleSaveSKUs}>
         <div className={s.card}>

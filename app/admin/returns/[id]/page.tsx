@@ -22,6 +22,11 @@ interface ReturnData {
     metodaRambursare?: 'card' | 'cont'
     iban?: string
     numeTitular?: string
+    factura?: {
+      serie: string
+      numar: string
+      storno?: { serie: string; numar: string; data: string }
+    }
   }
   signature: string
   totalRefund: number
@@ -48,6 +53,19 @@ export default function ReturnDetailsPage() {
 
   const [statusSubmitting, setStatusSubmitting] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
+
+  // Navigare între retururi (listă sortată desc după data creării, ca în /admin/retururi)
+  const [navIds, setNavIds] = useState<string[]>([])
+
+  // Storno factură SmartBill
+  const [stornoOpen, setStornoOpen] = useState(false)
+  const [stornoLoading, setStornoLoading] = useState(false)
+  const [stornoSerie, setStornoSerie] = useState('')
+  const [stornoNumar, setStornoNumar] = useState('')
+  const [stornoConfigured, setStornoConfigured] = useState(true)
+  const [stornoDetectMsg, setStornoDetectMsg] = useState<string | null>(null)
+  const [stornoError, setStornoError] = useState<string | null>(null)
+  const [stornoResult, setStornoResult] = useState<string | null>(null)
 
   interface TrackingEvent {
     statusId: number
@@ -126,8 +144,98 @@ export default function ReturnDetailsPage() {
   }
 
   useEffect(() => {
+    // Reset la schimbarea returului (navigare cu săgeți) ca să nu rămână date vechi
+    setLoading(true)
+    setTracking(null)
+    setTrackingError(null)
+    setTrackingMsg(null)
+    setIsEditMode(false)
+    setStornoOpen(false)
+    setStornoError(null)
+    setStornoResult(null)
     loadReturnDetails()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id])
+
+  // Lista de ID-uri pentru navigarea ◀ ▶ (aceeași ordine ca lista de retururi)
+  useEffect(() => {
+    fetch('/api/returns')
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) setNavIds((data.returns || []).map((r: any) => r.idRetur))
+      })
+      .catch(() => {})
+  }, [])
+
+  const navIdx = navIds.indexOf(String(params.id))
+  // Lista e sortată desc (cel mai nou primul): ▶ = mai nou (idx-1), ◀ = mai vechi (idx+1)
+  const newerId = navIdx > 0 ? navIds[navIdx - 1] : null
+  const olderId = navIdx >= 0 && navIdx < navIds.length - 1 ? navIds[navIdx + 1] : null
+
+  const handleStornoPreview = async () => {
+    setStornoLoading(true)
+    setStornoError(null)
+    setStornoResult(null)
+    setStornoDetectMsg(null)
+    try {
+      const r = await fetch(`/api/admin/returns/${params.id}/storno`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'preview' }),
+      })
+      const data = await r.json()
+      if (!data.success) {
+        setStornoError(data.message || 'Eroare la căutarea facturii.')
+        return
+      }
+      if (data.alreadyStorno) {
+        setStornoResult(data.message)
+        await loadReturnDetails()
+        return
+      }
+      setStornoSerie(data.factura?.serie || '')
+      setStornoNumar(data.factura?.numar || '')
+      setStornoConfigured(!!data.smartbillConfigured)
+      if (!data.factura) {
+        setStornoDetectMsg(data.detectError || 'Factura nu a fost găsită automat — completează seria și numărul.')
+      }
+      setStornoOpen(true)
+    } catch {
+      setStornoError('Eroare de rețea.')
+    } finally {
+      setStornoLoading(false)
+    }
+  }
+
+  const handleStornoExecute = async () => {
+    if (!stornoSerie.trim() || !stornoNumar.trim()) {
+      setStornoError('Completează seria și numărul facturii.')
+      return
+    }
+    setStornoLoading(true)
+    setStornoError(null)
+    try {
+      const r = await fetch(`/api/admin/returns/${params.id}/storno`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'execute', serie: stornoSerie.trim(), numar: stornoNumar.trim() }),
+      })
+      const data = await r.json()
+      if (!data.success) {
+        setStornoError(data.message || 'Eroare la stornare.')
+        return
+      }
+      setStornoResult(data.message)
+      setStornoOpen(false)
+      if (!data.demo) {
+        await loadReturnDetails()
+      }
+    } catch {
+      setStornoError('Eroare de rețea.')
+    } finally {
+      setStornoLoading(false)
+    }
+  }
 
   // Auto-cere tracking-ul SameDay la deschiderea returului. Endpointul aplică
   // și statusul nou dacă curierul a avansat. Nu rulăm pe statusuri terminale
@@ -431,6 +539,52 @@ export default function ReturnDetailsPage() {
               fontSize: '14px',
               color: '#666'
             }}>ID Retur: {dataToDisplay.idRetur}</p>
+            {navIdx >= 0 && navIds.length > 1 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                marginTop: '12px'
+              }}>
+                <button
+                  onClick={() => olderId && router.push(`/admin/returns/${olderId}`)}
+                  disabled={!olderId}
+                  title="Returul anterior (mai vechi)"
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0',
+                    backgroundColor: olderId ? '#fff' : '#f5f5f5',
+                    color: olderId ? '#333' : '#bbb',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    cursor: olderId ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  ◀
+                </button>
+                <span style={{ fontSize: '13px', color: '#666', whiteSpace: 'nowrap' }}>
+                  {navIds.length - navIdx} din {navIds.length}
+                </span>
+                <button
+                  onClick={() => newerId && router.push(`/admin/returns/${newerId}`)}
+                  disabled={!newerId}
+                  title="Returul următor (mai nou)"
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0',
+                    backgroundColor: newerId ? '#fff' : '#f5f5f5',
+                    color: newerId ? '#333' : '#bbb',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    cursor: newerId ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  ▶
+                </button>
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             {!isEditMode ? (
@@ -1289,6 +1443,202 @@ export default function ReturnDetailsPage() {
             )
           })()}
         </div>
+
+        {/* Factură SmartBill (storno) */}
+        {!isEditMode && (
+          <div style={{
+            backgroundColor: '#f9f9f9',
+            borderRadius: '12px',
+            padding: '24px',
+            marginBottom: '24px'
+          }}>
+            <h2 style={{
+              fontSize: '18px',
+              fontWeight: 'bold',
+              marginBottom: '16px',
+              color: '#333'
+            }}>
+              Factură
+            </h2>
+
+            {dataToDisplay.refundData.factura?.storno ? (
+              <div style={{
+                padding: '16px',
+                backgroundColor: '#e8f5e9',
+                border: '1px solid #a5d6a7',
+                borderRadius: '10px',
+                color: '#2e7d32',
+                fontSize: '14px',
+                fontWeight: 'bold'
+              }}>
+                ✓ Factura {dataToDisplay.refundData.factura.serie} {dataToDisplay.refundData.factura.numar} a fost stornată
+                — storno {dataToDisplay.refundData.factura.storno.serie} {dataToDisplay.refundData.factura.storno.numar} din {dataToDisplay.refundData.factura.storno.data}
+              </div>
+            ) : (
+              <>
+                {stornoResult && (
+                  <div style={{
+                    padding: '14px 16px',
+                    backgroundColor: '#e3f2fd',
+                    border: '1px solid #90caf9',
+                    borderRadius: '10px',
+                    color: '#1565c0',
+                    fontSize: '14px',
+                    marginBottom: '12px'
+                  }}>
+                    {stornoResult}
+                  </div>
+                )}
+                {stornoError && (
+                  <div style={{
+                    padding: '14px 16px',
+                    backgroundColor: '#ffebee',
+                    border: '1px solid #ef9a9a',
+                    borderRadius: '10px',
+                    color: '#c62828',
+                    fontSize: '14px',
+                    marginBottom: '12px'
+                  }}>
+                    {stornoError}
+                  </div>
+                )}
+
+                {!stornoOpen ? (
+                  <button
+                    onClick={handleStornoPreview}
+                    disabled={stornoLoading}
+                    style={{
+                      padding: '12px 24px',
+                      borderRadius: '8px',
+                      backgroundColor: stornoLoading ? '#ccc' : '#ff9800',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: stornoLoading ? 'not-allowed' : 'pointer',
+                      boxShadow: stornoLoading ? 'none' : '0 2px 8px rgba(255, 152, 0, 0.3)'
+                    }}
+                  >
+                    {stornoLoading ? 'Caut factura…' : 'Stornează factura'}
+                  </button>
+                ) : (
+                  <div style={{
+                    padding: '16px',
+                    backgroundColor: '#fff',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '10px'
+                  }}>
+                    <p style={{ fontSize: '14px', color: '#333', marginBottom: '12px', fontWeight: 'bold' }}>
+                      Storno pentru comanda {dataToDisplay.numarComanda}
+                    </p>
+                    {stornoDetectMsg && (
+                      <div style={{
+                        padding: '10px 12px',
+                        backgroundColor: '#fff8e1',
+                        border: '1px solid #ffe082',
+                        borderRadius: '8px',
+                        color: '#8d6e00',
+                        fontSize: '13px',
+                        marginBottom: '12px'
+                      }}>
+                        {stornoDetectMsg}
+                      </div>
+                    )}
+                    {!stornoConfigured && (
+                      <div style={{
+                        padding: '10px 12px',
+                        backgroundColor: '#e3f2fd',
+                        border: '1px solid #90caf9',
+                        borderRadius: '8px',
+                        color: '#1565c0',
+                        fontSize: '13px',
+                        marginBottom: '12px'
+                      }}>
+                        Mod DEMO — SmartBill nu e configurat, nu se stornează real.
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: 'bold' }}>
+                          Serie factură
+                        </label>
+                        <input
+                          type="text"
+                          value={stornoSerie}
+                          onChange={(e) => setStornoSerie(e.target.value)}
+                          placeholder="ex: MXX"
+                          style={{
+                            width: '120px',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid #e0e0e0',
+                            fontSize: '14px',
+                            fontFamily: 'monospace',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: 'bold' }}>
+                          Număr factură
+                        </label>
+                        <input
+                          type="text"
+                          value={stornoNumar}
+                          onChange={(e) => setStornoNumar(e.target.value)}
+                          placeholder="ex: 54575"
+                          style={{
+                            width: '140px',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid #e0e0e0',
+                            fontSize: '14px',
+                            fontFamily: 'monospace',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={handleStornoExecute}
+                        disabled={stornoLoading}
+                        style={{
+                          padding: '12px 24px',
+                          borderRadius: '8px',
+                          backgroundColor: stornoLoading ? '#ccc' : '#f44336',
+                          color: '#fff',
+                          border: 'none',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          cursor: stornoLoading ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {stornoLoading ? 'Se stornează…' : `Confirmă stornarea facturii ${stornoSerie} ${stornoNumar}`.trim()}
+                      </button>
+                      <button
+                        onClick={() => { setStornoOpen(false); setStornoError(null) }}
+                        disabled={stornoLoading}
+                        style={{
+                          padding: '12px 24px',
+                          borderRadius: '8px',
+                          backgroundColor: '#e0e0e0',
+                          color: '#333',
+                          border: 'none',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          cursor: stornoLoading ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        Renunță
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {/* AWB și documente */}
         <div style={{

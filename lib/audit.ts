@@ -34,6 +34,9 @@ export type AuditAction =
   | 'code_check_rate_limited'
   | 'create_return_invalid_code'
   | 'create_return_code_race'
+  | 'storno_invoice'
+  | 'storno_invoice_demo'
+  | 'storno_invoice_fail'
 
 export interface AuditEntry {
   timestamp: string

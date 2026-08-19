@@ -59,6 +59,23 @@ export interface ShopifyOrder {
   gateway?: string // Gateway de plată
   financial_status?: string // Statusul financiar al comenzii ('paid', 'pending', 'refunded', etc.)
   total_outstanding?: string // Suma neachitată (ar trebui să fie '0.00' pentru comenzi plătite)
+  note_attributes?: Array<{ name: string; value: string }> // Atribute custom (ex. xConnector pune factura aici)
+}
+
+/**
+ * Extrage seria + numărul facturii SmartBill dintr-o comandă Shopify.
+ * xConnector pune pe `note_attributes` cheia `xconnector-invoice-url`, un URL cu
+ * query string `...&s={serie}&n={numar}&...`. Storno-urile NU apar în Shopify.
+ */
+export function extractInvoiceFromOrder(
+  order: Pick<ShopifyOrder, 'note_attributes'>
+): { serie: string; numar: string } | null {
+  const attr = (order.note_attributes || []).find(a => a.name === 'xconnector-invoice-url')
+  if (!attr || !attr.value) return null
+  const serie = attr.value.match(/[?&]s=([^&]+)/)?.[1]
+  const numar = attr.value.match(/[?&]n=([^&]+)/)?.[1]
+  if (!serie || !numar) return null
+  return { serie: decodeURIComponent(serie), numar: decodeURIComponent(numar) }
 }
 
 export interface SearchOrderResult {
