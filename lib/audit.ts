@@ -37,6 +37,8 @@ export type AuditAction =
   | 'storno_invoice'
   | 'storno_invoice_demo'
   | 'storno_invoice_fail'
+  | 'pickscan_status_change'
+  | 'pickscan_auth_fail'
 
 export interface AuditEntry {
   timestamp: string
@@ -101,6 +103,43 @@ export async function logAudit(entry: Omit<AuditEntry, 'timestamp'>): Promise<vo
     fs.writeFileSync(AUDIT_FILE, JSON.stringify(entries, null, 2))
   } catch (err) {
     console.error('Failed to write audit log:', err)
+  }
+}
+
+/**
+ * Caută o intrare de audit după acțiune + o cheie din `details` (ex. scanId).
+ * Folosit pentru idempotență: același apel repetat nu trebuie să producă nimic.
+ */
+export async function findAuditEntryByDetail(
+  action: AuditAction,
+  detailKey: string,
+  detailValue: string
+): Promise<AuditEntry | null> {
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('audit_log')
+        .select('*')
+        .eq('action', action)
+        .contains('details', { [detailKey]: detailValue })
+        .order('timestamp', { ascending: false })
+        .limit(1)
+      return data && data.length > 0 ? (data[0] as AuditEntry) : null
+    } catch {
+      return null
+    }
+  }
+
+  if (!fs.existsSync(AUDIT_FILE)) return null
+  try {
+    const entries: AuditEntry[] = JSON.parse(fs.readFileSync(AUDIT_FILE, 'utf8'))
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]
+      if (e.action === action && e.details?.[detailKey] === detailValue) return e
+    }
+    return null
+  } catch {
+    return null
   }
 }
 

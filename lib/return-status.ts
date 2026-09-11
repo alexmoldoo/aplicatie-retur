@@ -87,6 +87,13 @@ export const AUTO_STATUSES: ReadonlySet<ReturnStatus> = new Set([
   RETURN_STATUS.LIVRAT,
 ])
 
+/**
+ * Statusuri pe care le poate seta un operator la RECEPȚIA coletului (ex. din
+ * PickScan, la scanarea AWB-ului). Banii / storno rămân manuale în admin, deci
+ * FINALIZAT și ANULAT nu sunt permise aici.
+ */
+export const RECEPTION_STATUSES: readonly ReturnStatus[] = [RETURN_STATUS.PRIMIT]
+
 /** Statusuri terminale — un retur ajuns aici nu mai trece automat mai departe. */
 export const TERMINAL_STATUSES: ReadonlySet<ReturnStatus> = new Set([
   RETURN_STATUS.FINALIZAT,
