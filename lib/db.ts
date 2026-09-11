@@ -831,6 +831,24 @@ export async function findReturnById(idRetur: string): Promise<Return | null> {
 }
 
 /**
+ * Găsește returul asociat unui AWB (SameDay sau AWB-ul propriu introdus de client).
+ * Dacă același AWB apare pe mai multe retururi, preferă returul ne-terminal
+ * cel mai recent. Comparație tolerantă la spații / majuscule.
+ */
+export async function findReturnByAwb(awb: string): Promise<Return | null> {
+  const wanted = (awb || '').replace(/\s/g, '').toUpperCase()
+  if (!wanted) return null
+  const all = await getReturns()
+  const matches = all.filter(
+    r => (r.awbNumber || '').replace(/\s/g, '').toUpperCase() === wanted
+  )
+  if (matches.length === 0) return null
+  matches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  const open = matches.find(r => r.status !== 'FINALIZAT' && r.status !== 'ANULAT')
+  return open || matches[0]
+}
+
+/**
  * Găsește cel mai recent retur asociat unui număr de comandă (sau null).
  * Filtrează implicit returnurile anulate ca să nu blocheze un nou retur valid.
  */
