@@ -38,6 +38,9 @@ export type AuditAction =
   | 'storno_invoice_demo'
   | 'storno_invoice_fail'
   | 'pickscan_status_change'
+  | 'payment_batch_generated'
+  | 'payment_batch_finalized'
+  | 'payment_batch_cancelled'
   | 'pickscan_auth_fail'
 
 export interface AuditEntry {

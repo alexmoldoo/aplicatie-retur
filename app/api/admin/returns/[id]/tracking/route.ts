@@ -66,12 +66,15 @@ export async function GET(
   let appliedStatus: string | null = null
 
   // Auto-advance doar pe statusurile non-manuale și non-terminale.
-  if (!TERMINAL_STATUSES.has(ret.status) && ret.status !== 'PRIMIT') {
+  if (!TERMINAL_STATUSES.has(ret.status) && ret.status !== 'PRIMIT' && ret.status !== 'IN_PLATA') {
     const mapped = sameDayStatusToInternal({
       expeditionStatusId: tracking.expeditionStatusId,
       expeditionStatus: tracking.expeditionStatus,
     })
-    if (mapped && STATUS_RANK[mapped] > STATUS_RANK[ret.status]) {
+    // Recitim chiar înainte de scriere: apelul la curier durează, iar între timp
+    // returul poate fi fost marcat manual sau intrat într-un fișier de plăți.
+    const fresh = mapped ? await findReturnById(ret.idRetur) : null
+    if (mapped && fresh && fresh.status === ret.status && STATUS_RANK[mapped] > STATUS_RANK[ret.status]) {
       const updated = await updateReturnStatus(ret.idRetur, mapped)
       if (updated) {
         appliedStatus = mapped

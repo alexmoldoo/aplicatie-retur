@@ -64,6 +64,7 @@ function returnStatusColor(status: ReturnStatus): { bg: string; fg: string; bord
     case 'IN_TRANZIT':
     case 'LIVRAT':
     case 'PRIMIT':
+    case 'IN_PLATA':
       return { bg: '#dbeafe', fg: '#1e40af', border: '#93c5fd' }
     case 'FINALIZAT':
       return { bg: '#dcfce7', fg: '#166534', border: '#86efac' }
@@ -311,6 +312,8 @@ export default function OrderSelection({ orders, onSelectOrder, onBack }: OrderS
                   <div className="os-sel-er-msg">
                     {er.status === 'FINALIZAT' ? (
                       <>✅ Returul a fost finalizat și suma a fost rambursată.</>
+                    ) : er.status === 'IN_PLATA' ? (
+                      <>💳 Rambursarea este în curs de plată.</>
                     ) : er.status === 'LIVRAT' || er.status === 'PRIMIT' ? (
                       <>📦 Coletul a fost livrat la noi și e în procesare.</>
                     ) : er.status === 'PRELUAT_CURIER' || er.status === 'IN_TRANZIT' ? (

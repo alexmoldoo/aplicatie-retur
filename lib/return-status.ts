@@ -2,11 +2,12 @@
  * Statusurile retururilor — sursă unică pentru tot codebase-ul.
  *
  * Flux principal:
- *   INITIAT → PRELUAT_CURIER → IN_TRANZIT → LIVRAT → PRIMIT → FINALIZAT
+ *   INITIAT → PRELUAT_CURIER → IN_TRANZIT → LIVRAT → PRIMIT → IN_PLATA → FINALIZAT
  *   (oricând) → ANULAT
  *
  * Statusurile automate (din tracking SameDay): PRELUAT_CURIER, IN_TRANZIT, LIVRAT.
  * Statusurile manuale (confirmate de operator/owner): PRIMIT, FINALIZAT, ANULAT.
+ * IN_PLATA se setează la generarea fișierului de plăți (vezi lib/bt-payments.ts).
  */
 
 export const RETURN_STATUS = {
@@ -15,6 +16,7 @@ export const RETURN_STATUS = {
   IN_TRANZIT: 'IN_TRANZIT',
   LIVRAT: 'LIVRAT',
   PRIMIT: 'PRIMIT',
+  IN_PLATA: 'IN_PLATA',
   FINALIZAT: 'FINALIZAT',
   ANULAT: 'ANULAT',
 } as const
@@ -27,6 +29,7 @@ export const RETURN_STATUS_LIST: ReturnStatus[] = [
   RETURN_STATUS.IN_TRANZIT,
   RETURN_STATUS.LIVRAT,
   RETURN_STATUS.PRIMIT,
+  RETURN_STATUS.IN_PLATA,
   RETURN_STATUS.FINALIZAT,
   RETURN_STATUS.ANULAT,
 ]
@@ -37,6 +40,7 @@ export const RETURN_STATUS_LABEL: Record<ReturnStatus, string> = {
   IN_TRANZIT: 'În tranzit',
   LIVRAT: 'Livrat',
   PRIMIT: 'Primit',
+  IN_PLATA: 'În plată',
   FINALIZAT: 'Finalizat',
   ANULAT: 'Anulat',
 }
@@ -48,6 +52,7 @@ export const RETURN_STATUS_COLOR: Record<ReturnStatus, 'gray' | 'blue' | 'amber'
   IN_TRANZIT: 'amber',
   LIVRAT: 'teal',
   PRIMIT: 'teal',
+  IN_PLATA: 'amber',
   FINALIZAT: 'green',
   ANULAT: 'red',
 }
@@ -69,6 +74,14 @@ export function normalizeStatus(s: string | null | undefined): ReturnStatus {
   if (s in RETURN_STATUS) return s as ReturnStatus
   if (s in LEGACY_MAP) return LEGACY_MAP[s]
   return RETURN_STATUS.INITIAT
+}
+
+/**
+ * Valorile brute din DB care se citesc ca statusul dat (canonicul + cele legacy).
+ * Folosit la actualizări condiționate: `PROCESAT` din DB trebuie tratat ca PRIMIT.
+ */
+export function rawStatusesFor(status: ReturnStatus): string[] {
+  return [status, ...Object.keys(LEGACY_MAP).filter(k => LEGACY_MAP[k] === status)]
 }
 
 /** True dacă valoarea e un status canonic (nu legacy, nu necunoscut). */
@@ -112,7 +125,8 @@ export const STATUS_RANK: Record<ReturnStatus, number> = {
   IN_TRANZIT: 2,
   LIVRAT: 3,
   PRIMIT: 4,
-  FINALIZAT: 5,
+  IN_PLATA: 5,
+  FINALIZAT: 6,
   ANULAT: -1,
 }
 

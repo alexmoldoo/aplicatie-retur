@@ -9,7 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import type { ReturnStatus } from './return-status'
-import { normalizeStatus } from './return-status'
+import { normalizeStatus, rawStatusesFor } from './return-status'
 
 const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
 const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
@@ -100,6 +100,12 @@ export interface AppConfig {
   // Stocate normalizat (fără „#", uppercase). Vezi normalizeOrderNumber().
   eligibilityOverrides: string[]
   smartbill: SmartbillConfig
+  // Plăți rambursări în lot (fișier BT Go). Stocat în blob-ul `return_info` — fără coloană nouă.
+  plati: PaymentsConfig
+}
+
+export interface PaymentsConfig {
+  ibanSursa: string // IBAN-ul contului BT din care se plătesc rambursările
 }
 
 const EMPTY_SMARTBILL: SmartbillConfig = { email: '', token: '', cif: '' }
@@ -145,6 +151,16 @@ export interface RefundData {
     serie: string
     numar: string
     storno?: { serie: string; numar: string; data: string }
+  }
+  // Plata rambursării printr-un fișier de plăți în lot (BT Go). `linie` e rândul
+  // CSV exact trimis la bancă, păstrat ca fișierul să poată fi descărcat identic.
+  plata?: {
+    lot: string
+    nr: number
+    suma: number
+    linie: string
+    generatLa: string
+    platitLa?: string
   }
   // Metoda de expediere a coletului către magazin (din Pas 5)
   metodaTrimitere?: 'curier' | 'manual'
@@ -384,6 +400,7 @@ export async function getConfig(): Promise<AppConfig> {
         excludedSKUs: [],
         eligibilityOverrides: [],
         smartbill: { ...EMPTY_SMARTBILL },
+        plati: { ibanSursa: '' },
       }
     }
 
@@ -402,6 +419,7 @@ export async function getConfig(): Promise<AppConfig> {
         token: (data.smartbill as any)?.token || '',
         cif: (data.smartbill as any)?.cif || '',
       },
+      plati: { ibanSursa: (data.return_info as any)?.plati?.ibanSursa || '' },
     }
   }
   
@@ -424,6 +442,7 @@ export async function getConfig(): Promise<AppConfig> {
         token: parsed.smartbill?.token || '',
         cif: parsed.smartbill?.cif || '',
       },
+      plati: { ibanSursa: parsed.plati?.ibanSursa || '' },
     }
   } catch (error) {
     return {
@@ -437,6 +456,7 @@ export async function getConfig(): Promise<AppConfig> {
       excludedSKUs: [],
       eligibilityOverrides: [],
       smartbill: { ...EMPTY_SMARTBILL },
+      plati: { ibanSursa: '' },
     }
   }
 }
@@ -544,6 +564,40 @@ export async function updateExcludedSKUs(skus: string[]): Promise<void> {
   // Fallback la JSON
   const config = await getConfig()
   config.excludedSKUs = skus
+  saveConfig(config)
+}
+
+/**
+ * Salvează IBAN-ul contului plătitor (plăți rambursări în lot).
+ * În Supabase stă în blob-ul JSONB `return_info` (cheia `plati`), ca să nu fie
+ * nevoie de o coloană nouă; restul blob-ului se păstrează neschimbat.
+ */
+export async function updatePaymentsConfig(cfg: PaymentsConfig): Promise<void> {
+  if (supabase) {
+    const { data: existing } = await supabase
+      .from('app_config')
+      .select('id, return_info')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (existing) {
+      const blob = { ...((existing.return_info as Record<string, unknown>) || {}), plati: cfg }
+      const { error } = await supabase
+        .from('app_config')
+        .update({ return_info: blob, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+      if (error) throw new Error('Eroare la salvarea contului plătitor: ' + error.message)
+    } else {
+      const { error } = await supabase.from('app_config').insert({ return_info: { plati: cfg } })
+      if (error) throw new Error('Eroare la crearea configurației: ' + error.message)
+    }
+    return
+  }
+
+  // Fallback la JSON
+  const config = await getConfig()
+  config.plati = cfg
   saveConfig(config)
 }
 
@@ -828,6 +882,39 @@ export async function findReturnById(idRetur: string): Promise<Return | null> {
   // Fallback la JSON
   const returns = await getReturns()
   return returns.find(r => r.idRetur === idRetur) || null
+}
+
+/**
+ * Actualizare condiționată (compare-and-set): schimbă statusul / refundData DOAR
+ * dacă returul e încă în statusul așteptat. Întoarce true dacă exact un rând a
+ * fost modificat. Folosit la plăți, unde două cereri simultane nu au voie să
+ * „câștige" amândouă același retur.
+ */
+export async function updateReturnIfStatus(
+  idRetur: string,
+  expected: ReturnStatus,
+  updates: { status: ReturnStatus; refundData?: RefundData }
+): Promise<boolean> {
+  if (supabase) {
+    const dbUpdates: Record<string, unknown> = { status: updates.status }
+    if (updates.refundData !== undefined) dbUpdates.refund_data = updates.refundData
+    const { data, error } = await supabase
+      .from('returns')
+      .update(dbUpdates)
+      .eq('id_retur', idRetur)
+      .in('status', rawStatusesFor(expected))
+      .select('id_retur')
+    return !error && Array.isArray(data) && data.length === 1
+  }
+
+  // Fallback la JSON — citire proaspătă chiar înainte de scriere
+  const returns = await getReturns()
+  const i = returns.findIndex(r => r.idRetur === idRetur)
+  if (i === -1 || normalizeStatus(returns[i].status) !== expected) return false
+  returns[i].status = updates.status
+  if (updates.refundData !== undefined) returns[i].refundData = updates.refundData
+  saveReturns(returns)
+  return true
 }
 
 /**

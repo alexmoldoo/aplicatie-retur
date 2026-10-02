@@ -37,7 +37,7 @@ export default function AdminDashboard() {
     total: normalized.length,
     initiat: normalized.filter(r => r.status === 'INITIAT').length,
     inLucru: normalized.filter(r =>
-      ['PRELUAT_CURIER', 'IN_TRANZIT', 'LIVRAT', 'PRIMIT'].includes(r.status)
+      ['PRELUAT_CURIER', 'IN_TRANZIT', 'LIVRAT', 'PRIMIT', 'IN_PLATA'].includes(r.status)
     ).length,
     finalizat: normalized.filter(r => r.status === 'FINALIZAT').length,
   }

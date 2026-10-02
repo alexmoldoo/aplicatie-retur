@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { getReturns, updateReturnStatus } from '@/lib/db'
+import { getReturns, findReturnById, updateReturnStatus } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getClientIp } from '@/lib/security'
@@ -49,7 +49,7 @@ async function runRefresh(triggeredBy: string, ip: string): Promise<RefreshResul
   const candidates = all.filter(r => {
     if (!r.awbNumber) return false
     if (TERMINAL_STATUSES.has(r.status)) return false
-    if (r.status === 'PRIMIT') return false
+    if (r.status === 'PRIMIT' || r.status === 'IN_PLATA') return false
     return true
   })
 
@@ -80,6 +80,14 @@ async function runRefresh(triggeredBy: string, ip: string): Promise<RefreshResul
 
       // Anti-downgrade: aplicăm doar dacă noul status are rang mai mare decât cel curent.
       if (STATUS_RANK[mapped] <= STATUS_RANK[ret.status]) {
+        result.skipped++
+        continue
+      }
+
+      // Recitim chiar înainte de scriere: lista a fost încărcată la început, iar
+      // între timp returul poate fi fost marcat manual sau intrat într-un fișier de plăți.
+      const fresh = await findReturnById(ret.idRetur)
+      if (!fresh || fresh.status !== ret.status) {
         result.skipped++
         continue
       }
