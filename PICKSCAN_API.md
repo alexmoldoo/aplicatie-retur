@@ -53,7 +53,8 @@ atât conexiunea cât și autentificarea.
     { "code": "IN_TRANZIT",     "label": "În tranzit",        "rank": 2, "terminal": false, "auto": true,  "receptionSettable": false },
     { "code": "LIVRAT",         "label": "Livrat",            "rank": 3, "terminal": false, "auto": true,  "receptionSettable": false },
     { "code": "PRIMIT",         "label": "Primit",            "rank": 4, "terminal": false, "auto": false, "receptionSettable": true  },
-    { "code": "FINALIZAT",      "label": "Finalizat",         "rank": 5, "terminal": true,  "auto": false, "receptionSettable": false },
+    { "code": "IN_PLATA",       "label": "În plată",          "rank": 5, "terminal": false, "auto": false, "receptionSettable": false },
+    { "code": "FINALIZAT",      "label": "Finalizat",         "rank": 6, "terminal": true,  "auto": false, "receptionSettable": false },
     { "code": "ANULAT",         "label": "Anulat",            "rank": -1,"terminal": true,  "auto": false, "receptionSettable": false }
   ]
 }

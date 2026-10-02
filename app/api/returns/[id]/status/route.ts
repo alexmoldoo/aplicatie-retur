@@ -59,6 +59,22 @@ export async function PATCH(
     const fromStatus = existing.status
     const toStatus = status as ReturnStatus
 
+    if (toStatus === 'IN_PLATA') {
+      return NextResponse.json(
+        { success: false, message: 'Statusul „În plată" se setează din „Plăți retururi", la generarea fișierului.' },
+        { status: 400 }
+      )
+    }
+
+    // Un retur aflat într-un fișier de plăți poate doar să fie finalizat de aici.
+    // Orice altă mutare l-ar putea readuce în lista de plată → plată dublă.
+    if (fromStatus === 'IN_PLATA' && toStatus !== 'FINALIZAT') {
+      return NextResponse.json(
+        { success: false, message: 'Returul este într-un fișier de plăți. Anulează lotul din „Plăți retururi" ca să-i schimbi statusul.' },
+        { status: 409 }
+      )
+    }
+
     if (fromStatus === toStatus) {
       return NextResponse.json(
         { success: false, message: 'Returul este deja în acest status.' },

@@ -165,3 +165,13 @@ export function InboxIcon({ size = 36, ...rest }: IconProps) {
     </svg>
   )
 }
+
+export function WalletIcon({ size = 22, ...rest }: IconProps) {
+  return (
+    <svg {...baseProps(size, rest)}>
+      <path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2" />
+      <path d="M3 7v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2H5a2 2 0 0 1-2-2Z" />
+      <path d="M17 14h.01" />
+    </svg>
+  )
+}

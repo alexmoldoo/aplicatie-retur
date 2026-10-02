@@ -13,6 +13,7 @@ function badgeClassFor(status: ReturnStatus): string {
     case 'IN_TRANZIT': return s.badgeWarning
     case 'LIVRAT': return s.badgeInfo
     case 'PRIMIT': return s.badgeInfo
+    case 'IN_PLATA': return s.badgeWarning
     case 'FINALIZAT': return s.badgeSuccess
     case 'ANULAT': return s.badgeError
     default: return s.badgeNeutral

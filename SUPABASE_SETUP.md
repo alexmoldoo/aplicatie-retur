@@ -56,6 +56,7 @@ INSERT INTO app_config (id) VALUES (gen_random_uuid());
 ALTER TABLE app_config ADD COLUMN IF NOT EXISTS eligibility_overrides JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE app_config ADD COLUMN IF NOT EXISTS smartbill JSONB DEFAULT '{}'::jsonb;
 
+
 -- Tabel retururi
 CREATE TABLE returns (
   id_retur TEXT PRIMARY KEY,
@@ -65,7 +66,7 @@ CREATE TABLE returns (
   refund_data JSONB NOT NULL,
   signature TEXT NOT NULL,
   total_refund DECIMAL(10,2) NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('INITIAT', 'IN_ASTEPTARE_COLET', 'COLET_PRIMIT', 'PROCESAT', 'FINALIZAT', 'ANULAT')),
+  status TEXT NOT NULL CHECK (status IN ('INITIAT', 'PRELUAT_CURIER', 'IN_TRANZIT', 'LIVRAT', 'PRIMIT', 'IN_PLATA', 'FINALIZAT', 'ANULAT', 'IN_ASTEPTARE_COLET', 'COLET_PRIMIT', 'PROCESAT')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   pdf_path TEXT,
   qr_code_data TEXT,
@@ -107,6 +108,16 @@ CREATE INDEX idx_return_codes_used_by_return ON return_codes(used_by_return_id) 
 ```
 
 4. Click pe "Run" pentru a executa query-ul
+
+#### Migrare pentru o bază de date existentă: statusul „În plată"
+
+Dacă tabelul `returns` există deja, rulează separat (sigur de rulat de mai multe ori;
+ultimele trei valori sunt statusurile vechi, păstrate pentru compatibilitate):
+
+```sql
+ALTER TABLE returns DROP CONSTRAINT IF EXISTS returns_status_check;
+ALTER TABLE returns ADD CONSTRAINT returns_status_check CHECK (status IN ('INITIAT', 'PRELUAT_CURIER', 'IN_TRANZIT', 'LIVRAT', 'PRIMIT', 'IN_PLATA', 'FINALIZAT', 'ANULAT', 'IN_ASTEPTARE_COLET', 'COLET_PRIMIT', 'PROCESAT'));
+```
 
 ### 4. Configurează Variabilele de Mediu în Vercel
 

@@ -82,12 +82,43 @@ export async function PUT(
     } = body
 
     const { updateReturn } = await import('@/lib/db')
+
+    const existing = await findReturnById(params.id)
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, message: 'Return not found' },
+        { status: 404 }
+      )
+    }
+
+    // Un retur aflat într-un fișier de plăți nu se editează: IBAN-ul / suma din
+    // fișierul trimis la bancă trebuie să rămână cele de pe retur.
+    if (existing.status === 'IN_PLATA') {
+      return NextResponse.json(
+        { success: false, message: 'Returul este într-un fișier de plăți. Anulează lotul din „Plăți retururi" ca să-l poți modifica.' },
+        { status: 409 }
+      )
+    }
+
+    // Statusul NU se schimbă de aici (are ruta lui, cu reguli) — pagina de editare
+    // trimite tot returul, posibil cu un status vechi. Iar `plata` și `factura`
+    // sunt gestionate doar de server: le păstrăm pe cele din DB.
+    void status
+    let mergedRefundData = refundData
+    if (refundData !== undefined && refundData !== null) {
+      const { plata: _p, factura: _f, ...clientRefund } = refundData
+      mergedRefundData = {
+        ...clientRefund,
+        ...(existing.refundData?.plata ? { plata: existing.refundData.plata } : {}),
+        ...(existing.refundData?.factura ? { factura: existing.refundData.factura } : {}),
+      }
+    }
+
     const updatedReturn = await updateReturn(params.id, {
       orderData,
       products,
-      refundData,
+      refundData: mergedRefundData,
       totalRefund,
-      status,
       awbNumber,
       shippingReceiptPhoto,
       packageLabelPhoto,
@@ -128,6 +159,14 @@ export async function DELETE(
       return NextResponse.json(
         { success: false, message: 'Unauthorized' },
         { status: 401 }
+      )
+    }
+
+    const toDelete = await findReturnById(params.id)
+    if (toDelete?.status === 'IN_PLATA') {
+      return NextResponse.json(
+        { success: false, message: 'Returul este într-un fișier de plăți. Anulează lotul din „Plăți retururi" înainte să-l ștergi.' },
+        { status: 409 }
       )
     }
 

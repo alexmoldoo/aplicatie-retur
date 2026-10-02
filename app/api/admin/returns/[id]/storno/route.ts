@@ -135,8 +135,11 @@ export async function POST(
     const storno = await reverseInvoice(config.smartbill, factura.serie, factura.numar)
 
     // Persistă pe retur factura originală + documentul de storno.
+    // Recitim returul: apelul SmartBill durează, iar refundData poate fi fost
+    // modificat între timp (ex. a intrat într-un fișier de plăți).
+    const freshReturn = (await findReturnById(returnData.idRetur)) || returnData
     const newRefundData = {
-      ...returnData.refundData,
+      ...freshReturn.refundData,
       factura: { serie: factura.serie, numar: factura.numar, storno },
     }
     await updateReturn(returnData.idRetur, { refundData: newRefundData })

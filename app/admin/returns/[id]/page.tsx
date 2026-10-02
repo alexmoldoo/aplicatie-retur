@@ -242,7 +242,7 @@ export default function ReturnDetailsPage() {
   // sau pe PRIMIT (operatorul a confirmat manual; tracking-ul nu mai contează).
   useEffect(() => {
     if (!returnData?.awbNumber) return
-    if (TERMINAL_STATUSES.has(returnData.status) || returnData.status === 'PRIMIT') return
+    if (TERMINAL_STATUSES.has(returnData.status) || returnData.status === 'PRIMIT' || returnData.status === 'IN_PLATA') return
     if (tracking?.awbNumber === returnData.awbNumber) return
     refreshTracking()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -420,6 +420,7 @@ export default function ReturnDetailsPage() {
       case 'IN_TRANZIT': return '#FB8C00'
       case 'LIVRAT': return '#9C27B0'
       case 'PRIMIT': return '#00BCD4'
+      case 'IN_PLATA': return '#F9A825'
       case 'FINALIZAT': return '#4CAF50'
       case 'ANULAT': return '#f44336'
       default: return '#666'
@@ -859,7 +860,7 @@ export default function ReturnDetailsPage() {
                   }}
                 >
                   {RETURN_STATUS_LIST.map((k) => (
-                    <option key={k} value={k}>
+                    <option key={k} value={k} disabled={k === 'IN_PLATA' && returnData.status !== 'IN_PLATA'}>
                       {RETURN_STATUS_LABEL[k]}
                     </option>
                   ))}
