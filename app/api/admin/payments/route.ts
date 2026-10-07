@@ -3,14 +3,16 @@ import { cookies } from 'next/headers'
 import crypto from 'crypto'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import {
-  getReturns,
+  getReturnsLight,
   getConfig,
   findReturnById,
   updateReturnIfStatus,
   updatePaymentsConfig,
   type Return,
+  type ReturnLight,
 } from '@/lib/db'
-import { logAudit } from '@/lib/audit'
+import { logAudit, getAuditEntriesByActions, type AuditEntry } from '@/lib/audit'
+import { monthKeyRO, currentAndPreviousMonthRO } from '@/lib/dates'
 import { getClientIp } from '@/lib/security'
 import { RETURN_STATUS } from '@/lib/return-status'
 import {
@@ -30,7 +32,7 @@ export const runtime = 'nodejs'
 const ALREADY_IN_FILE = 'A mai fost într-un fișier de plăți.'
 
 /** Rambursările pe card nu trec prin fișierul de plăți. */
-function isBankRefund(r: Return): boolean {
+function isBankRefund(r: Pick<Return, 'refundData'>): boolean {
   return r.refundData?.metodaRambursare !== 'card'
 }
 
@@ -47,18 +49,126 @@ function newLotId(now: Date = new Date()): string {
   return `LOT-${p.year}${p.month}${p.day}-${p.hour}${p.minute}${p.second}-${suffix}`
 }
 
-function lotOf(r: Return): string {
+function lotOf(r: Pick<Return, 'refundData'>): string {
   return r.refundData?.plata?.lot || ''
 }
 
-/** Fișierul unui lot aflat încă în plată, cu data plății adusă la zi. */
-function csvForLot(all: Return[], lot: string): string | null {
+/**
+ * Fișierul unui lot. Pentru un lot încă în plată data plății e adusă la zi
+ * (poți să-l încarci la bancă și mâine). Pentru un lot închis fișierul rămâne
+ * exact cel generat. Un lot anulat nu mai are rânduri pe retururi, dar le avem
+ * în jurnal, ca istoricul să rămână descărcabil.
+ */
+function csvForLot(all: ReturnLight[], lot: string, generated?: AuditEntry): string | null {
+  if (!lot) return null
   const rows = all
-    .filter(r => lot && r.status === RETURN_STATUS.IN_PLATA && lotOf(r) === lot && r.refundData?.plata?.linie)
+    .filter(r => lotOf(r) === lot && r.refundData?.plata?.linie)
     .sort((a, b) => (a.refundData!.plata!.nr || 0) - (b.refundData!.plata!.nr || 0))
-  if (rows.length === 0) return null
-  const today = btValueDate()
-  return buildBtCsv(rows.map(r => withValueDate(r.refundData!.plata!.linie, today)))
+  if (rows.length > 0) {
+    const stillOpen = rows.some(r => r.status === RETURN_STATUS.IN_PLATA)
+    const today = btValueDate()
+    return buildBtCsv(rows.map(r => (stillOpen ? withValueDate(r.refundData!.plata!.linie, today) : r.refundData!.plata!.linie)))
+  }
+  const lines = generated?.details?.lines
+  if (Array.isArray(lines) && lines.length > 0) return buildBtCsv(lines as string[])
+  return null
+}
+
+/** Când a plecat banul pentru un retur finalizat (pentru totaluri pe lună). */
+function paidAt(r: ReturnLight): string {
+  return r.refundData?.finalizatLa || r.refundData?.plata?.platitLa || r.createdAt
+}
+
+/** Istoricul fișierelor, din jurnalul de audit: generat / descărcat / plătit / anulat. */
+const HISTORY_ACTIONS = ['payment_batch_generated', 'payment_batch_finalized', 'payment_batch_cancelled', 'payment_batch_downloaded'] as const
+
+function buildHistory(all: ReturnLight[], entries: AuditEntry[]) {
+  const byLot = new Map<string, {
+    lot: string
+    generatLa: string
+    count: number
+    total: number
+    user: string | null
+    returns: string[]
+    hasLines: boolean
+    stare: 'in_plata' | 'platit' | 'anulat' | 'inchis'
+    platitLa: string | null
+    anulatLa: string | null
+    descarcari: number
+    ultimaDescarcare: string | null
+  }>()
+  // Jurnalul e nou → vechi; parcurgem invers ca „generat" să vină primul.
+  for (const e of [...entries].reverse()) {
+    const lot = typeof e.details?.lot === 'string' ? e.details.lot : ''
+    if (!lot) continue
+    if (e.action === 'payment_batch_generated') {
+      byLot.set(lot, {
+        lot,
+        generatLa: e.timestamp,
+        count: Number(e.details?.count) || (e.details?.returns?.length ?? 0),
+        total: Number(e.details?.total) || 0,
+        user: e.details?.user || null,
+        returns: Array.isArray(e.details?.returns) ? e.details.returns : [],
+        hasLines: Array.isArray(e.details?.lines) && e.details.lines.length > 0,
+        stare: 'in_plata',
+        platitLa: null,
+        anulatLa: null,
+        descarcari: 0,
+        ultimaDescarcare: null,
+      })
+      continue
+    }
+    const h = byLot.get(lot)
+    if (!h) continue
+    if (e.action === 'payment_batch_finalized') { h.stare = 'platit'; h.platitLa = e.timestamp }
+    if (e.action === 'payment_batch_cancelled') { h.stare = 'anulat'; h.anulatLa = e.timestamp }
+    if (e.action === 'payment_batch_downloaded') { h.descarcari++; h.ultimaDescarcare = e.timestamp }
+  }
+  // Starea reală o dau retururile, nu jurnalul: un retur poate fi finalizat și de
+  // mână, din pagina lui, fără un eveniment „lot plătit".
+  for (const h of Array.from(byLot.values())) {
+    const live = all.filter(r => lotOf(r) === h.lot)
+    if (live.some(r => r.status === RETURN_STATUS.IN_PLATA)) {
+      h.stare = 'in_plata'
+    } else if (live.some(r => r.status === RETURN_STATUS.FINALIZAT)) {
+      h.stare = 'platit'
+      h.platitLa = h.platitLa || live.find(r => r.refundData?.plata?.platitLa)?.refundData?.plata?.platitLa
+        || live.find(r => r.refundData?.finalizatLa)?.refundData?.finalizatLa || null
+    } else if (h.stare !== 'anulat') {
+      h.stare = 'inchis'
+    }
+  }
+  return Array.from(byLot.values()).sort((a, b) => b.generatLa.localeCompare(a.generatLa))
+}
+
+/** Cât s-a dat înapoi: luna aceasta, luna trecută, total — separat bancă / card. */
+function buildTotals(all: ReturnLight[]) {
+  const { current, previous } = currentAndPreviousMonthRO()
+  const empty = () => ({ total: 0, banca: 0, card: 0, count: 0 })
+  const buckets = { lunaAceasta: empty(), lunaTrecuta: empty(), total: empty() }
+  for (const r of all) {
+    if (r.status !== RETURN_STATUS.FINALIZAT) continue
+    const suma = Number((r.refundData?.plata?.suma ?? r.totalRefund) || 0)
+    if (!(suma > 0)) continue
+    const key = monthKeyRO(paidAt(r))
+    const add = (b: ReturnType<typeof empty>) => {
+      b.total += suma
+      b.count++
+      if (isBankRefund(r)) b.banca += suma
+      else b.card += suma
+    }
+    add(buckets.total)
+    if (key === current) add(buckets.lunaAceasta)
+    else if (key === previous) add(buckets.lunaTrecuta)
+  }
+  const round = (b: ReturnType<typeof empty>) => ({
+    total: Number(b.total.toFixed(2)), banca: Number(b.banca.toFixed(2)), card: Number(b.card.toFixed(2)), count: b.count,
+  })
+  return {
+    lunaAceasta: { ...round(buckets.lunaAceasta), luna: current },
+    lunaTrecuta: { ...round(buckets.lunaTrecuta), luna: previous },
+    total: round(buckets.total),
+  }
 }
 
 async function requireAdmin() {
@@ -77,12 +187,21 @@ export async function GET(request: NextRequest) {
   const user = await requireAdmin()
   if (!user) return NextResponse.json({ success: false, message: 'Neautorizat' }, { status: 401 })
 
-  const all = await getReturns()
   const lotParam = request.nextUrl.searchParams.get('lot')
 
   if (lotParam && request.nextUrl.searchParams.get('download')) {
-    const csv = csvForLot(all, lotParam)
-    if (!csv) return NextResponse.json({ success: false, message: 'Lot inexistent sau deja închis.' }, { status: 404 })
+    const [{ returns: all }, generatedEntries] = await Promise.all([
+      getReturnsLight(),
+      getAuditEntriesByActions(['payment_batch_generated'], 1000),
+    ])
+    const generated = generatedEntries.find(e => e.details?.lot === lotParam)
+    const csv = csvForLot(all, lotParam, generated)
+    if (!csv) return NextResponse.json({ success: false, message: 'Lot inexistent.' }, { status: 404 })
+    await logAudit({
+      action: 'payment_batch_downloaded',
+      ip: getClientIp(request),
+      details: { lot: lotParam, user: user.email },
+    })
     return new NextResponse(csv, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
@@ -91,7 +210,12 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  const config = await getConfig()
+  // Cele trei citiri sunt independente — le facem în paralel, nu una după alta.
+  const [{ returns: all }, config, historyEntries] = await Promise.all([
+    getReturnsLight(),
+    getConfig(),
+    getAuditEntriesByActions([...HISTORY_ACTIONS], 1000),
+  ])
 
   const eligible: Array<Record<string, unknown>> = []
   const manual: Array<Record<string, unknown>> = []
@@ -115,7 +239,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const lotsMap = new Map<string, Return[]>()
+  const lotsMap = new Map<string, ReturnLight[]>()
   for (const r of all) {
     if (r.status !== RETURN_STATUS.IN_PLATA) continue
     const key = lotOf(r)
@@ -150,6 +274,8 @@ export async function GET(request: NextRequest) {
     manual,
     cardCount,
     lots,
+    history: buildHistory(all, historyEntries),
+    totals: buildTotals(all),
   })
 }
 
@@ -240,7 +366,7 @@ export async function POST(request: NextRequest) {
     await logAudit({
       action: 'payment_batch_generated',
       ip,
-      details: { lot, count: lines.length, total, returns: included, skipped, user: user.email },
+      details: { lot, count: lines.length, total, returns: included, skipped, user: user.email, valueDate, lines },
     })
 
     return NextResponse.json({
@@ -256,7 +382,7 @@ export async function POST(request: NextRequest) {
 
   if (action === 'finalize' || action === 'cancel') {
     const lot = typeof body.lot === 'string' ? body.lot : ''
-    const all = await getReturns()
+    const { returns: all } = await getReturnsLight()
     const inLot = all.filter(r => r.status === RETURN_STATUS.IN_PLATA && lotOf(r) === lot)
     if (inLot.length === 0) {
       return NextResponse.json({ success: false, message: 'Lotul nu mai are retururi în plată.' }, { status: 404 })
@@ -270,9 +396,12 @@ export async function POST(request: NextRequest) {
 
       let ok: boolean
       if (action === 'finalize') {
-        const refundData = r.refundData?.plata
-          ? { ...r.refundData, plata: { ...r.refundData.plata, platitLa: new Date().toISOString() } }
-          : r.refundData
+        const now = new Date().toISOString()
+        const refundData = {
+          ...r.refundData,
+          finalizatLa: now,
+          ...(r.refundData?.plata ? { plata: { ...r.refundData.plata, platitLa: now } } : {}),
+        }
         ok = await updateReturnIfStatus(r.idRetur, RETURN_STATUS.IN_PLATA, { status: RETURN_STATUS.FINALIZAT, refundData })
       } else {
         const { plata: _removed, ...refundData } = r.refundData || {}

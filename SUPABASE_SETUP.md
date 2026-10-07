@@ -72,8 +72,16 @@ CREATE TABLE returns (
   qr_code_data TEXT,
   awb_number TEXT,
   shipping_receipt_photo TEXT,
-  package_label_photo TEXT
+  package_label_photo TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- updated_at se setează singur la orice modificare (sincronizare „doar ce e nou" în admin)
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS returns_set_updated_at ON returns;
+CREATE TRIGGER returns_set_updated_at BEFORE UPDATE ON returns FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Tabel coduri pentru retur gratuit (generate manual din admin pentru cazurile când
 -- vina e a magazinului — produs defect, comandă greșită etc.)
@@ -108,6 +116,21 @@ CREATE INDEX idx_return_codes_used_by_return ON return_codes(used_by_return_id) 
 ```
 
 4. Click pe "Run" pentru a executa query-ul
+
+#### Migrare pentru o bază de date existentă: `updated_at` pe retururi
+
+Adminul încarcă doar retururile modificate de la ultima vizită. Pentru asta
+tabelul `returns` are nevoie de coloana `updated_at`, întreținută automat:
+
+```sql
+ALTER TABLE returns ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS returns_set_updated_at ON returns;
+CREATE TRIGGER returns_set_updated_at BEFORE UPDATE ON returns FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+Fără ea aplicația merge, dar reîncarcă toată lista (ușoară) la fiecare pagină.
 
 #### Migrare pentru o bază de date existentă: statusul „În plată"
 

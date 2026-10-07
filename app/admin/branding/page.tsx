@@ -17,7 +17,7 @@ export default function BrandingPage() {
 
   const loadCfg = async () => {
     try {
-      const res = await fetch('/api/config/return-info')
+      const res = await fetch('/api/config/return-info?include=logo')
       const data = await res.json()
       if (data.success && data.logo) setLogo(data.logo)
     } catch {

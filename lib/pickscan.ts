@@ -51,7 +51,10 @@ export function verifyPickscanKey(request: NextRequest): NextResponse | null {
 }
 
 /** Forma unui retur așa cum o vede PickScan — doar ce-i trebuie la recepție. */
-export function toPickscanReturn(ret: Return, shop: string) {
+export function toPickscanReturn(
+  ret: Pick<Return, 'idRetur' | 'awbNumber' | 'numarComanda' | 'status' | 'refundData' | 'createdAt'>,
+  shop: string
+) {
   return {
     idRetur: ret.idRetur,
     awbNumber: ret.awbNumber || null,

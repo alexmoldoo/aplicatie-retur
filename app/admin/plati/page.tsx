@@ -1,9 +1,12 @@
 'use client'
 
 import { useState, useEffect, FormEvent } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import PageHeader from '@/components/admin/PageHeader'
 import s from '@/components/AdminDashboard.module.css'
+import { monthLabelRO } from '@/lib/dates'
+import { invalidateReturnsCache } from '@/components/admin/useReturnsList'
 
 interface Eligible {
   idRetur: string
@@ -31,6 +34,23 @@ interface Lot {
   returns: Array<{ idRetur: string; numarComanda: string; numeTitular: string; suma: number }>
 }
 
+interface HistoryItem {
+  lot: string
+  generatLa: string
+  count: number
+  total: number
+  user: string | null
+  hasLines: boolean
+  stare: 'in_plata' | 'platit' | 'anulat' | 'inchis'
+  platitLa: string | null
+  anulatLa: string | null
+  descarcari: number
+  ultimaDescarcare: string | null
+}
+
+interface Bucket { total: number; banca: number; card: number; count: number; luna?: string }
+interface Totals { lunaAceasta: Bucket; lunaTrecuta: Bucket; total: Bucket }
+
 const ron = (n: number) => `${n.toFixed(2)} RON`
 const plati = (n: number) => (n === 1 ? '1 plată' : `${n} plăți`)
 const retururi = (n: number) => (n === 1 ? '1 retur' : `${n} retururi`)
@@ -54,6 +74,7 @@ function downloadCsv(filename: string, csv: string) {
 }
 
 export default function PlatiPage() {
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -68,6 +89,8 @@ export default function PlatiPage() {
   const [manual, setManual] = useState<Manual[]>([])
   const [lots, setLots] = useState<Lot[]>([])
   const [cardCount, setCardCount] = useState(0)
+  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [totals, setTotals] = useState<Totals | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -87,6 +110,8 @@ export default function PlatiPage() {
       setManual(d.manual || [])
       setLots(d.lots || [])
       setCardCount(d.cardCount || 0)
+      setHistory(d.history || [])
+      setTotals(d.totals || null)
       const ids: string[] = (d.eligible || []).map((e: Eligible) => e.idRetur)
       // Nimic bifat din oficiu: ce intră în fișier se alege explicit.
       setSelected(prev => new Set(ids.filter(id => prev.has(id))))
@@ -162,6 +187,7 @@ export default function PlatiPage() {
         return
       }
       downloadCsv(d.filename, d.csv)
+      invalidateReturnsCache()
       setSuccess(`Fișier generat: ${plati(d.count)}, total ${ron(d.total)}.`)
       await load()
     } catch {
@@ -183,6 +209,7 @@ export default function PlatiPage() {
     setBusy(true)
     try {
       const d = await post({ action, lot: lot.lot })
+      invalidateReturnsCache()
       if (!d.success) {
         setError(d.message || `Nu s-au putut actualiza: ${(d.failed || []).join(', ')}`)
       } else {
@@ -216,6 +243,29 @@ export default function PlatiPage() {
       {skipped.length > 0 && (
         <div className={`${s.alert} ${s.alertWarning}`}>
           Nu au intrat în fișier: {skipped.map(x => `${x.idRetur} (${x.reason})`).join('; ')}
+        </div>
+      )}
+
+      {totals && (
+        <div className={s.card}>
+          <div className={s.cardHeader}>
+            <h2 className={s.cardTitle}>Rambursat</h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            {([
+              { label: monthLabelRO(totals.lunaAceasta.luna || ''), b: totals.lunaAceasta },
+              { label: monthLabelRO(totals.lunaTrecuta.luna || ''), b: totals.lunaTrecuta },
+              { label: 'Total', b: totals.total },
+            ] as Array<{ label: string; b: Bucket }>).map(({ label, b }) => (
+              <div key={label} style={{ padding: '14px 16px', border: '1px solid var(--color-border, #e5e7eb)', borderRadius: '10px', background: '#fff' }}>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #6b7280)', textTransform: 'capitalize' }}>{label}</div>
+                <div style={{ fontSize: '22px', fontWeight: 800, margin: '4px 0' }}>{ron(b.total)}</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #6b7280)' }}>
+                  {retururi(b.count)} · bancă {ron(b.banca)} · card {ron(b.card)}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -367,7 +417,7 @@ export default function PlatiPage() {
               </thead>
               <tbody>
                 {manual.map(m => (
-                  <tr key={m.idRetur} onClick={() => (window.location.href = `/admin/returns/${m.idRetur}`)}>
+                  <tr key={m.idRetur} onClick={() => router.push(`/admin/returns/${m.idRetur}`)}>
                     <td style={{ fontWeight: 'var(--font-weight-bold)', color: 'var(--color-primary)', whiteSpace: 'nowrap' }}>{m.idRetur}</td>
                     <td>{m.numarComanda}</td>
                     <td>{m.numeClient || '—'}</td>
@@ -431,6 +481,63 @@ export default function PlatiPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className={s.card}>
+        <div className={s.cardHeader}>
+          <h2 className={s.cardTitle}>Istoric fișiere ({history.length})</h2>
+        </div>
+        {history.length === 0 ? (
+          <p className={s.hint} style={{ fontStyle: 'italic' }}>Niciun fișier generat încă.</p>
+        ) : (
+          <div className={s.tableWrap}>
+            <table className={s.table}>
+              <thead>
+                <tr>
+                  <th>Generat</th>
+                  <th>Plăți</th>
+                  <th style={{ textAlign: 'right' }}>Total</th>
+                  <th>Stare</th>
+                  <th>Descărcat</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(h => (
+                  <tr key={h.lot}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {roDateTime(h.generatLa)}
+                      {h.user && <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #6b7280)' }}>{h.user}</div>}
+                    </td>
+                    <td>{h.count}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 'var(--font-weight-semibold)' }}>{ron(h.total)}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {h.stare === 'platit' && <span className={`${s.badge} ${s.badgeSuccess}`}>Plătit</span>}
+                      {h.stare === 'anulat' && <span className={`${s.badge} ${s.badgeError}`}>Anulat</span>}
+                      {h.stare === 'in_plata' && <span className={`${s.badge} ${s.badgeWarning}`}>În plată</span>}
+                      {h.stare === 'inchis' && <span className={`${s.badge} ${s.badgeNeutral}`}>Închis</span>}
+                      {(h.platitLa || h.anulatLa) && (
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #6b7280)', marginTop: '4px' }}>
+                          {roDateTime(h.stare === 'anulat' ? h.anulatLa : h.platitLa)}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontSize: '13px', color: 'var(--color-text-muted, #6b7280)', whiteSpace: 'nowrap' }}>
+                      {h.descarcari === 0 ? 'niciodată' : `${h.descarcari}× · ultima ${roDateTime(h.ultimaDescarcare)}`}
+                    </td>
+                    <td>
+                      {(h.hasLines || h.stare !== 'anulat') && (
+                        <a href={`/api/admin/payments?lot=${encodeURIComponent(h.lot)}&download=1`} className={`${s.btn} ${s.btnSecondary} ${s.btnSm}`}>
+                          Descarcă
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

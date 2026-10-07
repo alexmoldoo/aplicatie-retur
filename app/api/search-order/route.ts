@@ -8,7 +8,7 @@ import {
   getShopifyAccessToken,
 } from '@/lib/shopify'
 import { calculateEligibility } from '@/lib/eligibility'
-import { getConfig, findReturnByOrderNumber, normalizeOrderNumber } from '@/lib/db'
+import { getConfig, findReturnSummaryByOrderNumber, normalizeOrderNumber } from '@/lib/db'
 import { isDevTestOrderNumber, buildDevTestOrder } from '@/lib/dev-test-orders'
 import { matchNames } from '@/lib/name-matcher'
 import { createCustomerToken } from '@/lib/customer-session'
@@ -51,7 +51,7 @@ async function enrichWithExistingReturns<T extends { numarComanda: string }>(ord
   return Promise.all(
     orders.map(async (order) => {
       try {
-        const existing = await findReturnByOrderNumber(order.numarComanda)
+        const existing = await findReturnSummaryByOrderNumber(order.numarComanda)
         if (!existing) return { ...order, existingReturn: null }
         return {
           ...order,
@@ -65,7 +65,7 @@ async function enrichWithExistingReturns<T extends { numarComanda: string }>(ord
           },
         }
       } catch (e) {
-        console.warn('findReturnByOrderNumber failed for', order.numarComanda, e)
+        console.warn('findReturnSummaryByOrderNumber failed for', order.numarComanda, e)
         return { ...order, existingReturn: null }
       }
     })

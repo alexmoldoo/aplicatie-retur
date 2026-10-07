@@ -60,7 +60,10 @@ async function loadConfigRow() {
 /**
  * GET — endpoint public pentru clientul de retur.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Logo-ul (imagine înglobată, zeci de KB) îl cere doar pagina de Branding;
+  // clientul la retur are nevoie doar de adresă și cost.
+  const includeLogo = request.nextUrl.searchParams.get('include') === 'logo'
   try {
     const row = await loadConfigRow()
     const blob: ReturnInfoBlob = row?.return_info || {}
@@ -69,7 +72,7 @@ export async function GET() {
       adresaRetur: blob.adresaRetur || FALLBACK.adresaRetur,
       transportCosts: blob.transportCosts || FALLBACK.transportCosts,
       shopTitle: row?.shop_title || FALLBACK.shopTitle,
-      logo: blob.branding?.logo || null,
+      ...(includeLogo ? { logo: blob.branding?.logo || null } : {}),
     })
   } catch (error) {
     console.error('Error reading return info config:', error)

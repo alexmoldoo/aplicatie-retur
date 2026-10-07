@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useReturnsList } from '@/components/admin/useReturnsList'
 import PageHeader from '@/components/admin/PageHeader'
 import { InboxIcon } from '@/components/admin/Icon'
 import s from '@/components/AdminDashboard.module.css'
@@ -21,49 +23,30 @@ function badgeClassFor(status: ReturnStatus): string {
 }
 
 export default function ReturnsPage() {
-  const [returns, setReturns] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
+  const router = useRouter()
+  const { returns: allReturns, loading, error: loadError, refresh } = useReturnsList()
   const [error, setError] = useState<string | null>(null)
   const [selectedStatus, setSelectedStatus] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [onlyToStorno, setOnlyToStorno] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadReturns()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStatus])
+  // Filtrele se aplică pe lista din memorie — fără drum la server la fiecare apăsare.
+  const q = searchQuery.toLowerCase().trim()
+  const returns = allReturns.filter((ret: any) => {
+    if (selectedStatus && normalizeStatus(ret.status) !== selectedStatus) return false
+    if (q && !(
+      ret.idRetur.toLowerCase().includes(q) ||
+      ret.numarComanda.toLowerCase().includes(q) ||
+      (ret.orderData?.nume && ret.orderData.nume.toLowerCase().includes(q))
+    )) return false
+    return true
+  })
 
   const loadReturns = async () => {
-    setLoading(true)
     setError(null)
-    try {
-      const params = new URLSearchParams()
-      if (selectedStatus) params.append('status', selectedStatus)
-      const url = `/api/returns${params.toString() ? `?${params.toString()}` : ''}`
-      const response = await fetch(url)
-      const data = await response.json()
-      if (data.success) {
-        let filtered = data.returns || []
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase().trim()
-          filtered = filtered.filter((ret: any) =>
-            ret.idRetur.toLowerCase().includes(q) ||
-            ret.numarComanda.toLowerCase().includes(q) ||
-            (ret.orderData?.nume && ret.orderData.nume.toLowerCase().includes(q))
-          )
-        }
-        setReturns(filtered)
-      } else {
-        setError(data.message || 'Eroare la încărcarea retururilor')
-        setReturns([])
-      }
-    } catch {
-      setError('Eroare la conectare. Vă rugăm să încercați din nou.')
-      setReturns([])
-    } finally {
-      setLoading(false)
-    }
+    await refresh(true)
   }
 
   const syncTracking = async () => {
@@ -86,7 +69,7 @@ export default function ReturnsPage() {
       }
       setSyncMsg(detail)
       if (updated > 0) {
-        await loadReturns()
+        await refresh(true)
       }
     } catch {
       setError('Eroare la conectare.')
@@ -99,7 +82,7 @@ export default function ReturnsPage() {
     <>
       <PageHeader title="Retururi" subtitle="Vezi și gestionează cererile de retur." />
 
-      {error && <div className={`${s.alert} ${s.alertError}`}>{error}</div>}
+      {(error || loadError) && <div className={`${s.alert} ${s.alertError}`}>{error || loadError}</div>}
       {syncMsg && <div className={`${s.alert} ${s.alertInfo || ''}`} style={{ background: 'var(--color-info-bg)', color: 'var(--color-info)', border: '1px solid var(--color-info-border)' }}>{syncMsg}</div>}
 
       <div className={s.filtersBar}>
@@ -108,7 +91,6 @@ export default function ReturnsPage() {
           placeholder="Caută după ID retur, număr comandă sau nume client…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') loadReturns() }}
           className={s.input}
         />
         <select
@@ -121,6 +103,10 @@ export default function ReturnsPage() {
             <option key={k} value={k}>{RETURN_STATUS_LABEL[k]}</option>
           ))}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap', fontSize: '14px', cursor: 'pointer' }}>
+          <input type="checkbox" checked={onlyToStorno} onChange={(e) => setOnlyToStorno(e.target.checked)} />
+          Doar de stornat
+        </label>
         <button onClick={loadReturns} className={`${s.btn} ${s.btnPrimary}`}>
           Reîncarcă
         </button>
@@ -134,7 +120,7 @@ export default function ReturnsPage() {
         </button>
       </div>
 
-      {loading ? (
+      {loading && allReturns.length === 0 ? (
         <div className={s.empty}>
           <div className={s.spinner} />
           <p className={s.emptyText}>Se încarcă retururile…</p>
@@ -159,15 +145,21 @@ export default function ReturnsPage() {
                 <th>Nume Client</th>
                 <th style={{ textAlign: 'right' }}>Total Rambursare</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
+                <th>Factură</th>
                 <th>Data Creării</th>
                 <th style={{ textAlign: 'center' }}>Acțiuni</th>
               </tr>
             </thead>
             <tbody>
-              {returns.map((ret: any) => (
+              {returns.filter((ret: any) => {
+                if (!onlyToStorno) return true
+                // „De stornat" = colet primit (sau mai departe), fără storno emis
+                const st = normalizeStatus(ret.status)
+                return ['PRIMIT', 'IN_PLATA', 'FINALIZAT'].includes(st) && !ret.refundData?.factura?.storno
+              }).map((ret: any) => (
                 <tr
                   key={ret.idRetur}
-                  onClick={() => window.location.href = `/admin/returns/${ret.idRetur}`}
+                  onClick={() => router.push(`/admin/returns/${ret.idRetur}`)}
                 >
                   <td style={{ fontWeight: 'var(--font-weight-bold)', color: 'var(--color-primary)' }}>
                     {ret.idRetur}
@@ -187,6 +179,26 @@ export default function ReturnsPage() {
                       )
                     })()}
                   </td>
+                  <td>
+                    {ret.refundData?.factura?.storno ? (
+                      <span
+                        className={`${s.badge} ${s.badgeSuccess}`}
+                        title={`Storno ${ret.refundData.factura.storno.serie} ${ret.refundData.factura.storno.numar} din ${ret.refundData.factura.storno.data} pentru factura ${ret.refundData.factura.serie} ${ret.refundData.factura.numar}`}
+                        onClick={(e) => { e.stopPropagation(); router.push(`/admin/returns/${ret.idRetur}#factura`) }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        Storno ✓
+                      </span>
+                    ) : (
+                      <span
+                        className={`${s.badge} ${s.badgeNeutral}`}
+                        onClick={(e) => { e.stopPropagation(); router.push(`/admin/returns/${ret.idRetur}#factura`) }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        Fără storno
+                      </span>
+                    )}
+                  </td>
                   <td style={{ color: 'var(--color-text-muted)' }}>
                     {new Date(ret.createdAt).toLocaleDateString('ro-RO')}
                   </td>
@@ -195,7 +207,7 @@ export default function ReturnsPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          window.location.href = `/admin/returns/${ret.idRetur}`
+                          router.push(`/admin/returns/${ret.idRetur}`)
                         }}
                         className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
                       >

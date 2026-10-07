@@ -79,13 +79,34 @@ export default function InformationStep({ onSubmit, onBack, products, initialShi
   }
 
   useEffect(() => {
+    // Setările (adresă, cost curier) se schimbă rar: le ținem 10 minute în sesiune,
+    // ca pasul să nu mai aștepte serverul la fiecare deschidere.
+    const CACHE_KEY = 'return-info:v1'
+    const apply = (d: any) => {
+      if (d?.adresaRetur) setAdresa(d.adresaRetur)
+      if (d?.transportCosts?.curier != null) setCosturi({ curier: d.transportCosts.curier })
+    }
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY)
+      if (raw) {
+        const cached = JSON.parse(raw)
+        if (cached?.at && Date.now() - cached.at < 10 * 60 * 1000) {
+          apply(cached.data)
+          return
+        }
+      }
+    } catch {
+      /* fără cache */
+    }
     fetch('/api/config/return-info')
       .then(r => r.json())
       .then(d => {
         if (d.success) {
-          if (d.adresaRetur) setAdresa(d.adresaRetur)
-          if (d.transportCosts?.curier != null) {
-            setCosturi({ curier: d.transportCosts.curier })
+          apply(d)
+          try {
+            sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), data: { adresaRetur: d.adresaRetur, transportCosts: d.transportCosts } }))
+          } catch {
+            /* ignore */
           }
         }
       })

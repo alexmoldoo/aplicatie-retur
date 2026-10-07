@@ -73,24 +73,10 @@ export default function ReturnProcess() {
   const [orderData, setOrderData] = useState<OrderData | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [refundData, setRefundData] = useState<RefundData | null>(null)
-  const [shopTitle, setShopTitle] = useState('MAXARI.RO')
+  const shopTitle = 'MAXARI.RO'
   const [foundOrders, setFoundOrders] = useState<any[]>([]) // Comenzile găsite în step 1
   const [sessionToken, setSessionToken] = useState<string | null>(null) // Token sesiune client după Pas 1
   const [showSignaturePopup, setShowSignaturePopup] = useState(false) // Control pentru pop-up semnătură
-
-  useEffect(() => {
-    // Încarcă titlul magazinului din configurație
-    fetch('/api/config')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.config?.shopify?.shopTitle) {
-          setShopTitle(data.config.shopify.shopTitle)
-        }
-      })
-      .catch(() => {
-        // Folosește default dacă nu se poate încărca
-      })
-  }, [])
 
   const handleOrderSubmit = (data: OrderData) => {
     setOrderData(data)
