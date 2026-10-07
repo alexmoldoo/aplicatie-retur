@@ -3,21 +3,15 @@
  * Fallback la JSON pentru development local dacă Supabase nu este configurat
  */
 
-import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import type { ReturnStatus } from './return-status'
 import { normalizeStatus, rawStatusesFor } from './return-status'
+import { supabaseServer } from './supabase'
 
-const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
-const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
-
-// Client Supabase pentru server-side
-const supabase = supabaseUrl && supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null
+const supabase = supabaseServer
 
 // Fallback pentru development local (JSON files)
 const DB_DIR = path.join(process.cwd(), 'data')

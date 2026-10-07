@@ -8,7 +8,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseServer } from './supabase'
 
 const FAIL_THRESHOLD = 19 // încercări eșuate înainte de blocare
 const FAIL_WINDOW_MS = 24 * 60 * 60_000 // numără eșecurile din ultimele 24h
@@ -25,11 +25,7 @@ interface BlocklistData {
   [ip: string]: IpRecord
 }
 
-const supabaseUrl = process.env.SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-const supabase = supabaseUrl && supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null
+const supabase = supabaseServer
 
 // In-memory cache ca să nu citească fișierul la fiecare cerere
 let cache: BlocklistData | null = null
