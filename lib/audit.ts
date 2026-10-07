@@ -5,7 +5,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseServer } from './supabase'
 
 export type AuditAction =
   | 'search_order_success'
@@ -51,11 +51,7 @@ export interface AuditEntry {
   details?: Record<string, any>
 }
 
-const supabaseUrl = process.env.SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-const supabase = supabaseUrl && supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null
+const supabase = supabaseServer
 
 const AUDIT_FILE = path.join(process.cwd(), 'data', 'audit.json')
 const MAX_ENTRIES = 5000

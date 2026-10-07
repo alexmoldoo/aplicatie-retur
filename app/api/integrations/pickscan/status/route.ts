@@ -85,10 +85,16 @@ export async function POST(request: NextRequest) {
 
   // Idempotență: același scanId procesat deja → răspuns identic, fără efecte.
   // Căutarea în jurnal (scanare repetată?) și căutarea returului sunt independente.
-  const [dup, ret] = await Promise.all([
-    findAuditEntryByDetail('pickscan_status_change', 'scanId', scanId),
-    idRetur ? findReturnById(idRetur) : findReturnByAwb(awb),
+  const timed = async <T,>(p: Promise<T>): Promise<[T, number]> => {
+    const t = Date.now()
+    const v = await p
+    return [v, Date.now() - t]
+  }
+  const [[dup, auditMs], [ret, lookupMs]] = await Promise.all([
+    timed(findAuditEntryByDetail('pickscan_status_change', 'scanId', scanId)),
+    timed(idRetur ? findReturnById(idRetur) : findReturnByAwb(awb)),
   ])
+  const serverTiming = { 'Server-Timing': `audit;dur=${auditMs}, lookup;dur=${lookupMs}` }
   if (dup) {
     return NextResponse.json({
       success: true,
@@ -107,7 +113,7 @@ export async function POST(request: NextRequest) {
         code: 'not_found',
         message: idRetur ? 'Retur inexistent.' : 'AWB-ul nu aparține niciunei cereri de retur.',
       },
-      { status: 404 }
+      { status: 404, headers: serverTiming }
     )
   }
 

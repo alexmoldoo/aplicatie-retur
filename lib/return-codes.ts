@@ -9,13 +9,9 @@
  */
 
 import crypto from 'crypto'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseServer } from './supabase'
 
-const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
-const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
-const supabase = supabaseUrl && supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null
+const supabase = supabaseServer
 
 function requireSupabase() {
   if (!supabase) {

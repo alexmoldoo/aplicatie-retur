@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { createClient } from '@supabase/supabase-js'
 import { getCurrentUserFromCookies } from '@/lib/auth'
+import { supabaseServer } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const supabaseUrl = (process.env.SUPABASE_URL || '').trim()
-const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
-const supabase = supabaseUrl && supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null
+const supabase = supabaseServer
 
 interface AdresaRetur {
   companie: string
@@ -65,7 +61,9 @@ export async function GET(request: NextRequest) {
   // clientul la retur are nevoie doar de adresă și cost.
   const includeLogo = request.nextUrl.searchParams.get('include') === 'logo'
   try {
+    const t0 = Date.now()
     const row = await loadConfigRow()
+    const dbMs = Date.now() - t0
     const blob: ReturnInfoBlob = row?.return_info || {}
     return NextResponse.json({
       success: true,
@@ -73,7 +71,7 @@ export async function GET(request: NextRequest) {
       transportCosts: blob.transportCosts || FALLBACK.transportCosts,
       shopTitle: row?.shop_title || FALLBACK.shopTitle,
       ...(includeLogo ? { logo: blob.branding?.logo || null } : {}),
-    })
+    }, { headers: { 'Server-Timing': `db;dur=${dbMs}` } })
   } catch (error) {
     console.error('Error reading return info config:', error)
     return NextResponse.json({ success: true, ...FALLBACK, logo: null })

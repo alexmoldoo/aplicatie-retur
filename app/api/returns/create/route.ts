@@ -9,9 +9,9 @@ import { isBlocked, recordFail } from '@/lib/ip-blocklist'
 import { createReturnAWB } from '@/lib/sameday'
 import { validateRomanianIBAN } from '@/lib/iban-validator'
 import { normalizeCode, validateCodeForRedemption, redeemCode, releaseCode, linkCodeToReturn, type CodeKind } from '@/lib/return-codes'
-import { createClient } from '@supabase/supabase-js'
 import fs from 'fs'
 import path from 'path'
+import { supabaseServer } from '@/lib/supabase'
 
 const MAX_PRODUCTS = 50
 const MAX_QTY_PER_PRODUCT = 50
@@ -19,9 +19,7 @@ const MAX_PRICE_PER_PRODUCT = 50000
 const MAX_SIGNATURE_BYTES = 250_000 // ~180KB PNG base64 reasonable
 const DEFAULT_CURIER_COST = 19.99
 
-const _sbUrl = (process.env.SUPABASE_URL || '').trim()
-const _sbKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
-const _supabase = _sbUrl && _sbKey ? createClient(_sbUrl, _sbKey) : null
+const _supabase = supabaseServer
 
 /**
  * Citește costul curier configurat de admin în /admin/Setări (stocat în
