@@ -17,7 +17,13 @@ export async function GET(
 ) {
   try {
     const cookieStore = await cookies()
-    const user = await getCurrentUserFromCookies(cookieStore)
+    // Verificarea login-ului și cele două citiri pornesc împreună (un singur drum
+    // la bază în loc de trei la rând). Datele nu pleacă decât dacă userul e logat.
+    const [user, returnData, usedCode] = await Promise.all([
+      getCurrentUserFromCookies(cookieStore),
+      findReturnById(params.id),
+      findCodeByReturnId(params.id),
+    ])
     
     if (!user) {
       return NextResponse.json(
@@ -26,17 +32,12 @@ export async function GET(
       )
     }
 
-    const returnData = await findReturnById(params.id)
-
     if (!returnData) {
       return NextResponse.json(
         { success: false, message: 'Return not found' },
         { status: 404 }
       )
     }
-
-    // Atașează codul de retur gratuit folosit (dacă există) — afișat în detalii admin.
-    const usedCode = await findCodeByReturnId(returnData.idRetur)
 
     return NextResponse.json({
       success: true,
