@@ -117,6 +117,16 @@ CREATE INDEX idx_return_codes_used_by_return ON return_codes(used_by_return_id) 
 
 4. Click pe "Run" pentru a executa query-ul
 
+#### Indexuri pentru jurnalul de audit (`audit_log`)
+
+Jurnalul primește o intrare la fiecare căutare de client și nu se golește singur.
+Fără indexuri, istoricul plăților și scanările PickScan îl citesc integral (~0,5 s).
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_audit_log_action_ts ON audit_log (action, "timestamp" DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_details ON audit_log USING GIN (details jsonb_path_ops);
+```
+
 #### Migrare pentru o bază de date existentă: `updated_at` pe retururi
 
 Adminul încarcă doar retururile modificate de la ultima vizită. Pentru asta

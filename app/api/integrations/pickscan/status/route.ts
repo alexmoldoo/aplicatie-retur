@@ -84,7 +84,11 @@ export async function POST(request: NextRequest) {
   }
 
   // Idempotență: același scanId procesat deja → răspuns identic, fără efecte.
-  const dup = await findAuditEntryByDetail('pickscan_status_change', 'scanId', scanId)
+  // Căutarea în jurnal (scanare repetată?) și căutarea returului sunt independente.
+  const [dup, ret] = await Promise.all([
+    findAuditEntryByDetail('pickscan_status_change', 'scanId', scanId),
+    idRetur ? findReturnById(idRetur) : findReturnByAwb(awb),
+  ])
   if (dup) {
     return NextResponse.json({
       success: true,
@@ -96,7 +100,6 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const ret = idRetur ? await findReturnById(idRetur) : await findReturnByAwb(awb)
   if (!ret) {
     return NextResponse.json(
       {

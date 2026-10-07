@@ -24,18 +24,21 @@ export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   try {
     const cookieStore = await cookies()
-    const user = await getCurrentUserFromCookies(cookieStore)
-    if (!user) {
-      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 })
-    }
-
     const { searchParams } = new URL(request.url)
     const sinceRaw = searchParams.get('since')
     const since = sinceRaw && !Number.isNaN(new Date(sinceRaw).getTime()) ? sinceRaw : undefined
     const status = searchParams.get('status')
 
     const serverTime = new Date(Date.now() - 2000).toISOString()
-    const { returns: all, supportsSince } = await getReturnsLight(since)
+    // Login + listă în paralel; lista nu pleacă decât dacă userul e logat.
+    const [user, light] = await Promise.all([
+      getCurrentUserFromCookies(cookieStore),
+      getReturnsLight(since),
+    ])
+    if (!user) {
+      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 })
+    }
+    const { returns: all, supportsSince } = light
 
     let returns = all
     if (status && isReturnStatus(status)) {

@@ -184,16 +184,15 @@ async function requireAdmin() {
  *   → fișierul CSV al unui lot aflat încă în plată.
  */
 export async function GET(request: NextRequest) {
-  const user = await requireAdmin()
-  if (!user) return NextResponse.json({ success: false, message: 'Neautorizat' }, { status: 401 })
-
   const lotParam = request.nextUrl.searchParams.get('lot')
 
   if (lotParam && request.nextUrl.searchParams.get('download')) {
-    const [{ returns: all }, generatedEntries] = await Promise.all([
+    const [user, { returns: all }, generatedEntries] = await Promise.all([
+      requireAdmin(),
       getReturnsLight(),
       getAuditEntriesByActions(['payment_batch_generated'], 1000),
     ])
+    if (!user) return NextResponse.json({ success: false, message: 'Neautorizat' }, { status: 401 })
     const generated = generatedEntries.find(e => e.details?.lot === lotParam)
     const csv = csvForLot(all, lotParam, generated)
     if (!csv) return NextResponse.json({ success: false, message: 'Lot inexistent.' }, { status: 404 })
@@ -210,12 +209,14 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  // Cele trei citiri sunt independente — le facem în paralel, nu una după alta.
-  const [{ returns: all }, config, historyEntries] = await Promise.all([
+  // Login + cele trei citiri, toate în paralel; nimic nu pleacă fără login.
+  const [user, { returns: all }, config, historyEntries] = await Promise.all([
+    requireAdmin(),
     getReturnsLight(),
     getConfig(),
     getAuditEntriesByActions([...HISTORY_ACTIONS], 1000),
   ])
+  if (!user) return NextResponse.json({ success: false, message: 'Neautorizat' }, { status: 401 })
 
   const eligible: Array<Record<string, unknown>> = []
   const manual: Array<Record<string, unknown>> = []
