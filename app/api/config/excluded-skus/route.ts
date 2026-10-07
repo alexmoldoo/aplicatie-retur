@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getConfig } from '@/lib/db'
 
+// Fără asta Next o „îngheață" la build: SKU-urile salvate în admin nu ajungeau
+// la clienți până la următorul deploy. Acum se reîmprospătează la cel mult 60 s.
+export const revalidate = 60
+
 /**
  * GET - Obține SKU-urile excluse (public endpoint pentru aplicația de retur)
  */

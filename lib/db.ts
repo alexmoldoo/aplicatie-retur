@@ -162,6 +162,8 @@ export interface RefundData {
     generatLa: string
     platitLa?: string
   }
+  // Când a devenit returul FINALIZAT (bani dați înapoi) — pentru totaluri pe lună.
+  finalizatLa?: string
   // Metoda de expediere a coletului către magazin (din Pas 5)
   metodaTrimitere?: 'curier' | 'manual'
   costTransport?: number   // 0 manual, 15.99 curier
@@ -183,6 +185,7 @@ export interface Return {
   awbNumber?: string // Număr AWB client (completat ulterior)
   shippingReceiptPhoto?: string // Poză chitanță expediere (path sau data URL)
   packageLabelPhoto?: string // Poză etichetă colet (path sau data URL)
+  updatedAt?: string // Ultima modificare (Supabase: trigger pe updated_at); pentru sincronizare „doar ce e nou"
 }
 
 const BCRYPT_ROUNDS = 12
@@ -705,6 +708,7 @@ export async function getReturns(): Promise<Return[]> {
       awbNumber: row.awb_number,
       shippingReceiptPhoto: row.shipping_receipt_photo,
       packageLabelPhoto: row.package_label_photo,
+      updatedAt: row.updated_at || undefined,
     }))
   }
   
@@ -740,6 +744,7 @@ export async function generateReturnId(): Promise<string> {
       .select('id_retur')
       .like('id_retur', `RET-${currentYear}-%`)
       .order('created_at', { ascending: false })
+      .limit(1)
     
     let nextNumber = 1
     if (data && data.length > 0) {
@@ -822,6 +827,7 @@ export async function createReturn(
       awbNumber: data.awb_number,
       shippingReceiptPhoto: data.shipping_receipt_photo,
       packageLabelPhoto: data.package_label_photo,
+      updatedAt: data.updated_at || undefined,
     }
   }
   
@@ -842,6 +848,7 @@ export async function createReturn(
     qrCodeData,
   }
   
+  newReturn.updatedAt = newReturn.createdAt
   returns.push(newReturn)
   saveReturns(returns)
   
@@ -876,12 +883,130 @@ export async function findReturnById(idRetur: string): Promise<Return | null> {
       awbNumber: data.awb_number,
       shippingReceiptPhoto: data.shipping_receipt_photo,
       packageLabelPhoto: data.package_label_photo,
+      updatedAt: data.updated_at || undefined,
     }
   }
   
   // Fallback la JSON
   const returns = await getReturns()
   return returns.find(r => r.idRetur === idRetur) || null
+}
+
+/** Câmpurile unui retur fără imaginile înglobate (semnătură, QR, poze) — pentru liste. */
+export type ReturnLight = Omit<Return, 'signature' | 'qrCodeData' | 'pdfPath' | 'shippingReceiptPhoto' | 'packageLabelPhoto' | 'products'>
+
+const LIGHT_COLUMNS_BASE =
+  'id_retur, numar_comanda, order_data, refund_data, total_refund, status, created_at, awb_number'
+
+// Coloana `updated_at` apare doar după migrarea din SUPABASE_SETUP.md. Până atunci
+// o interogare care o cere dă eroare, așa că o ținem minte (10 min) și cerem fără ea.
+let updatedAtMissingAt: number | null = null
+const UPDATED_AT_RECHECK_MS = 10 * 60_000
+
+function returnsHasUpdatedAt(): boolean {
+  return updatedAtMissingAt === null || Date.now() - updatedAtMissingAt > UPDATED_AT_RECHECK_MS
+}
+
+function isMissingUpdatedAtError(error: { message?: string; code?: string } | null): boolean {
+  return !!error && /updated_at/.test(error.message || '')
+}
+
+/**
+ * Rulează o interogare „ușoară" pe `returns`, cu `updated_at` dacă există,
+ * altfel fără. `build` primește coloanele și dacă poate filtra pe `updated_at`.
+ */
+async function runLightQuery<T>(
+  build: (columns: string, withUpdatedAt: boolean) => PromiseLike<{ data: T | null; error: any }>
+): Promise<{ data: T | null; error: any; withUpdatedAt: boolean }> {
+  if (returnsHasUpdatedAt()) {
+    const res = await build(`${LIGHT_COLUMNS_BASE}, updated_at`, true)
+    if (!isMissingUpdatedAtError(res.error)) {
+      if (!res.error) updatedAtMissingAt = null
+      return { ...res, withUpdatedAt: true }
+    }
+    updatedAtMissingAt = Date.now()
+  }
+  const res = await build(LIGHT_COLUMNS_BASE, false)
+  return { ...res, withUpdatedAt: false }
+}
+
+function mapLightRow(row: any): ReturnLight {
+  return {
+    idRetur: row.id_retur,
+    numarComanda: row.numar_comanda,
+    orderData: row.order_data,
+    refundData: row.refund_data,
+    totalRefund: parseFloat(row.total_refund),
+    status: normalizeStatus(row.status),
+    createdAt: row.created_at,
+    awbNumber: row.awb_number,
+    updatedAt: row.updated_at || undefined,
+  }
+}
+
+function toLight(r: Return): ReturnLight {
+  return {
+    idRetur: r.idRetur,
+    numarComanda: r.numarComanda,
+    orderData: r.orderData,
+    refundData: r.refundData,
+    totalRefund: r.totalRefund,
+    status: r.status,
+    createdAt: r.createdAt,
+    awbNumber: r.awbNumber,
+    updatedAt: r.updatedAt,
+  }
+}
+
+/**
+ * Lista „ușoară" de retururi: fără semnătură, QR, poze, produse — exact ce afișează
+ * dashboard-ul și lista. Cu `since`, doar retururile modificate după acel moment;
+ * dacă baza nu are încă `updated_at`, întoarce lista întreagă cu `supportsSince: false`.
+ */
+export async function getReturnsLight(since?: string): Promise<{ returns: ReturnLight[]; supportsSince: boolean }> {
+  if (supabase) {
+    const sb = supabase
+    const { data, error, withUpdatedAt } = await runLightQuery<any[]>((columns, withUpdated) => {
+      let q = sb.from('returns').select(columns).order('created_at', { ascending: false })
+      if (since && withUpdated) q = q.gt('updated_at', since)
+      return q
+    })
+    if (error) {
+      console.error('[db] getReturnsLight failed:', error.message)
+      throw new Error('Eroare la citirea retururilor: ' + error.message)
+    }
+    return { returns: (data || []).map(mapLightRow), supportsSince: withUpdatedAt }
+  }
+
+  const all = await getReturns()
+  const picked = since ? all.filter(r => r.updatedAt && r.updatedAt > since) : all
+  return { supportsSince: true, returns: picked.map(toLight) }
+}
+
+/** Cel mai recent retur (neanulat, implicit) al unei comenzi — varianta ușoară. */
+export async function findReturnSummaryByOrderNumber(
+  numarComanda: string,
+  opts?: { includeCancelled?: boolean }
+): Promise<ReturnLight | null> {
+  const includeCancelled = !!opts?.includeCancelled
+  if (supabase) {
+    const sb = supabase
+    const { data, error } = await runLightQuery<any[]>(columns => {
+      let q = sb
+        .from('returns')
+        .select(columns)
+        .eq('numar_comanda', numarComanda)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      if (!includeCancelled) q = q.neq('status', 'ANULAT')
+      return q
+    })
+    if (error || !data || data.length === 0) return null
+    return mapLightRow(data[0])
+  }
+
+  const { returns } = await getReturnsLight()
+  return returns.find(r => r.numarComanda === numarComanda && (includeCancelled || r.status !== 'ANULAT')) || null
 }
 
 /**
@@ -913,6 +1038,7 @@ export async function updateReturnIfStatus(
   if (i === -1 || normalizeStatus(returns[i].status) !== expected) return false
   returns[i].status = updates.status
   if (updates.refundData !== undefined) returns[i].refundData = updates.refundData
+  returns[i].updatedAt = new Date().toISOString()
   saveReturns(returns)
   return true
 }
@@ -925,14 +1051,15 @@ export async function updateReturnIfStatus(
 export async function findReturnByAwb(awb: string): Promise<Return | null> {
   const wanted = (awb || '').replace(/\s/g, '').toUpperCase()
   if (!wanted) return null
-  const all = await getReturns()
+  // Lista ușoară (fără semnături/QR) — apoi citim complet doar returul găsit.
+  const { returns: all } = await getReturnsLight()
   const matches = all.filter(
     r => (r.awbNumber || '').replace(/\s/g, '').toUpperCase() === wanted
   )
   if (matches.length === 0) return null
   matches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   const open = matches.find(r => r.status !== 'FINALIZAT' && r.status !== 'ANULAT')
-  return open || matches[0]
+  return findReturnById((open || matches[0]).idRetur)
 }
 
 /**
@@ -972,6 +1099,7 @@ export async function findReturnByOrderNumber(
       awbNumber: row.awb_number,
       shippingReceiptPhoto: row.shipping_receipt_photo,
       packageLabelPhoto: row.package_label_photo,
+      updatedAt: row.updated_at || undefined,
     }
   }
 
@@ -1012,6 +1140,7 @@ export async function updateReturnStatus(idRetur: string, status: Return['status
       awbNumber: data.awb_number,
       shippingReceiptPhoto: data.shipping_receipt_photo,
       packageLabelPhoto: data.package_label_photo,
+      updatedAt: data.updated_at || undefined,
     }
   }
   
@@ -1024,6 +1153,7 @@ export async function updateReturnStatus(idRetur: string, status: Return['status
   }
   
   returns[returnIndex].status = status
+  returns[returnIndex].updatedAt = new Date().toISOString()
   saveReturns(returns)
   
   return returns[returnIndex]
@@ -1113,6 +1243,7 @@ export async function updateReturnDocuments(
       awbNumber: data.awb_number,
       shippingReceiptPhoto: data.shipping_receipt_photo,
       packageLabelPhoto: data.package_label_photo,
+      updatedAt: data.updated_at || undefined,
     }
   }
   
@@ -1134,6 +1265,7 @@ export async function updateReturnDocuments(
     returns[returnIndex].packageLabelPhoto = packageLabelPhoto
   }
   
+  returns[returnIndex].updatedAt = new Date().toISOString()
   saveReturns(returns)
   
   return returns[returnIndex]
@@ -1191,6 +1323,7 @@ export async function updateReturn(
       awbNumber: data.awb_number,
       shippingReceiptPhoto: data.shipping_receipt_photo,
       packageLabelPhoto: data.package_label_photo,
+      updatedAt: data.updated_at || undefined,
     }
   }
   
@@ -1227,6 +1360,7 @@ export async function updateReturn(
   if (updates.packageLabelPhoto !== undefined) {
     returns[returnIndex].packageLabelPhoto = updates.packageLabelPhoto
   }
+  returns[returnIndex].updatedAt = new Date().toISOString()
   
   saveReturns(returns)
   

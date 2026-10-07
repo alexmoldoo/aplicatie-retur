@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getReturns, getConfig } from '@/lib/db'
+import { getReturnsLight, getConfig } from '@/lib/db'
 import { TERMINAL_STATUSES } from '@/lib/return-status'
 import { verifyPickscanKey, toPickscanReturn } from '@/lib/pickscan'
 
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   const limitRaw = Number(request.nextUrl.searchParams.get('limit'))
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : null
 
-  const [all, config] = await Promise.all([getReturns(), getConfig()])
+  const [{ returns: all }, config] = await Promise.all([getReturnsLight(), getConfig()])
   const shop = config.shopify.shopTitle || config.shopify.domain || ''
 
   let open = all

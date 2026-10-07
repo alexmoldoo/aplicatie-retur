@@ -41,6 +41,7 @@ export type AuditAction =
   | 'payment_batch_generated'
   | 'payment_batch_finalized'
   | 'payment_batch_cancelled'
+  | 'payment_batch_downloaded'
   | 'pickscan_auth_fail'
 
 export interface AuditEntry {
@@ -143,6 +144,32 @@ export async function findAuditEntryByDetail(
     return null
   } catch {
     return null
+  }
+}
+
+/** Intrările de audit pentru un set de acțiuni, cele mai noi primele. */
+export async function getAuditEntriesByActions(actions: AuditAction[], limit = 500): Promise<AuditEntry[]> {
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('audit_log')
+        .select('*')
+        .in('action', actions)
+        .order('timestamp', { ascending: false })
+        .limit(limit)
+      return (data || []) as AuditEntry[]
+    } catch {
+      return []
+    }
+  }
+
+  if (!fs.existsSync(AUDIT_FILE)) return []
+  try {
+    const entries: AuditEntry[] = JSON.parse(fs.readFileSync(AUDIT_FILE, 'utf8'))
+    const wanted = new Set<string>(actions)
+    return entries.filter(e => wanted.has(e.action)).reverse().slice(0, limit)
+  } catch {
+    return []
   }
 }
 

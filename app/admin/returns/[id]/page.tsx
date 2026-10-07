@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { RETURN_STATUS_LABEL, RETURN_STATUS_LIST, TERMINAL_STATUSES, normalizeStatus, type ReturnStatus } from '@/lib/return-status'
+import { useReturnsList, applyReturnToCache, removeReturnFromCache } from '@/components/admin/useReturnsList'
 
 interface ReturnData {
   idRetur: string
@@ -54,8 +55,9 @@ export default function ReturnDetailsPage() {
   const [statusSubmitting, setStatusSubmitting] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
 
-  // Navigare între retururi (listă sortată desc după data creării, ca în /admin/retururi)
-  const [navIds, setNavIds] = useState<string[]>([])
+  // Navigare între retururi: ID-urile vin din lista deja încărcată în memorie (fără alt fetch)
+  const { returns: navReturns } = useReturnsList()
+  const navIds = navReturns.map(r => r.idRetur)
 
   // Storno factură SmartBill
   const [stornoOpen, setStornoOpen] = useState(false)
@@ -136,6 +138,7 @@ export default function ReturnDetailsPage() {
       }
       setReturnData(data.return)
       setEditedData(data.return)
+      applyReturnToCache(data.return)
     } catch {
       setStatusError('Eroare la conectare.')
     } finally {
@@ -156,16 +159,6 @@ export default function ReturnDetailsPage() {
     loadReturnDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id])
-
-  // Lista de ID-uri pentru navigarea ◀ ▶ (aceeași ordine ca lista de retururi)
-  useEffect(() => {
-    fetch('/api/returns')
-      .then(r => r.json())
-      .then(data => {
-        if (data.success) setNavIds((data.returns || []).map((r: any) => r.idRetur))
-      })
-      .catch(() => {})
-  }, [])
 
   const navIdx = navIds.indexOf(String(params.id))
   // Lista e sortată desc (cel mai nou primul): ▶ = mai nou (idx-1), ◀ = mai vechi (idx+1)
@@ -256,6 +249,11 @@ export default function ReturnDetailsPage() {
       if (data.success) {
         setReturnData(data.return)
         setEditedData(data.return)
+        applyReturnToCache(data.return)
+        // Venit din lista de retururi cu „#factura" → derulăm direct la cardul de factură
+        if (typeof window !== 'undefined' && window.location.hash === '#factura') {
+          setTimeout(() => document.getElementById('factura')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150)
+        }
       } else {
         setError(data.message || 'Eroare la încărcarea detaliilor returului')
       }
@@ -279,6 +277,7 @@ export default function ReturnDetailsPage() {
 
       const data = await response.json()
       if (data.success) {
+        removeReturnFromCache(String(params.id))
         alert('Retur șters cu succes!')
         router.push('/admin')
       } else {
@@ -304,6 +303,7 @@ export default function ReturnDetailsPage() {
       if (data.success) {
         setReturnData(data.return)
         setEditedData(data.return)
+        applyReturnToCache(data.return)
         setIsEditMode(false)
         alert('Modificări salvate cu succes!')
       } else {
@@ -1447,7 +1447,7 @@ export default function ReturnDetailsPage() {
 
         {/* Factură SmartBill (storno) */}
         {!isEditMode && (
-          <div style={{
+          <div id="factura" style={{
             backgroundColor: '#f9f9f9',
             borderRadius: '12px',
             padding: '24px',

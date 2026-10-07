@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { getReturns, findReturnById, updateReturnStatus } from '@/lib/db'
+import { getReturnsLight, findReturnById, updateReturnStatus } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getClientIp } from '@/lib/security'
@@ -45,7 +45,7 @@ interface RefreshResult {
 
 async function runRefresh(triggeredBy: string, ip: string): Promise<RefreshResult> {
   const startedAt = Date.now()
-  const all = await getReturns()
+  const { returns: all } = await getReturnsLight()
   const candidates = all.filter(r => {
     if (!r.awbNumber) return false
     if (TERMINAL_STATUSES.has(r.status)) return false

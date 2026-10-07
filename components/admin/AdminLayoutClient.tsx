@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import AdminLogin from '@/components/AdminLogin'
+import { invalidateReturnsCache } from './useReturnsList'
 import shellCss from './AdminShell.module.css'
 import shellLayout from '../../app/admin/admin.module.css'
 import {
@@ -59,6 +60,26 @@ export function useAdminUser(): AdminUser {
   return u
 }
 
+const USER_CACHE_KEY = 'admin:user:v1'
+
+function readCachedUser(): AdminUser | null {
+  try {
+    const raw = sessionStorage.getItem(USER_CACHE_KEY)
+    return raw ? (JSON.parse(raw) as AdminUser) : null
+  } catch {
+    return null
+  }
+}
+
+function writeCachedUser(u: AdminUser | null) {
+  try {
+    if (u) sessionStorage.setItem(USER_CACHE_KEY, JSON.stringify(u))
+    else sessionStorage.removeItem(USER_CACHE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function AdminLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -70,15 +91,26 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
     try {
       const r = await fetch('/api/auth/check')
       const data = await r.json()
-      setUser(data.authenticated && data.user ? data.user : null)
+      const u = data.authenticated && data.user ? data.user : null
+      setUser(u)
+      writeCachedUser(u)
     } catch {
       setUser(null)
+      writeCachedUser(null)
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
+    // Contul ținut minte în tab → afișăm adminul imediat și verificăm login-ul în
+    // fundal. Datele sunt oricum protejate pe server; dacă sesiunea a expirat,
+    // verificarea arată ecranul de login.
+    const cached = readCachedUser()
+    if (cached) {
+      setUser(cached)
+      setLoading(false)
+    }
     checkAuth()
   }, [checkAuth])
 
@@ -89,6 +121,8 @@ export default function AdminLayoutClient({ children }: { children: React.ReactN
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
+      writeCachedUser(null)
+      invalidateReturnsCache()
       setUser(null)
       router.replace('/admin')
     } catch (e) {

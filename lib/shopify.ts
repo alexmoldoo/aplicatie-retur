@@ -170,19 +170,27 @@ export async function searchOrderByOrderNumber(
       }
     }
     
-    // Încearcă mai multe formate de căutare
+    // Încearcă mai multe formate de căutare — formatul magazinului (#MX…) primul,
+    // ca o comandă normală să fie găsită din prima cerere, nu din a patra.
     const searchPatterns = [
-      cleanOrderNumber, // 12345
-      `#${cleanOrderNumber}`, // #12345
-      `MX${cleanOrderNumber}`, // MX12345
       `#MX${cleanOrderNumber}`, // #MX12345
+      `MX${cleanOrderNumber}`, // MX12345
+      `#${cleanOrderNumber}`, // #12345
+      cleanOrderNumber, // 12345
     ]
+
+    // Acceptăm DOAR comanda cu exact acest număr (Shopify poate întoarce potriviri
+    // aproximative pe `name`).
+    const sameNumber = (name: string | undefined) =>
+      String(name || '').trim().toUpperCase().replace(/^#+/, '').replace(/^MX/, '').trim() === cleanOrderNumber
 
     console.log(`[shopify] searchOrderByOrderNumber domain=${shopifyDomain} tokenPrefix=${accessToken.slice(0, 8)}... patterns=${searchPatterns.join(',')}`)
 
     for (const pattern of searchPatterns) {
+      // `#` trebuie codificat: altfel e tratat ca fragment de URL, iar Shopify
+      // primește `name=` gol și întoarce ultimele comenzi, nu comanda căutată.
       const response = await fetch(
-        `https://${shopifyDomain}/admin/api/2026-04/orders.json?name=${pattern}&status=any`,
+        `https://${shopifyDomain}/admin/api/2026-04/orders.json?name=${encodeURIComponent(pattern)}&status=any`,
         {
           headers: {
             'X-Shopify-Access-Token': accessToken,
@@ -200,10 +208,11 @@ export async function searchOrderByOrderNumber(
       const data = await response.json()
       console.log(`[shopify] orders.json pattern=${pattern} status=200 found=${data.orders?.length || 0}`)
 
-      if (data.orders && data.orders.length > 0) {
+      const match = (data.orders || []).find((o: ShopifyOrder) => sameNumber(o.name))
+      if (match) {
         return {
           success: true,
-          order: data.orders[0],
+          order: match,
         }
       }
     }
@@ -302,38 +311,38 @@ async function searchCustomerByPhone(
       }
     }
     
+    // Toate variantele numărului (07…, +407…, 00407…) în paralel, nu una după alta.
+    const perVariant = await Promise.all(
+      phoneVariants.map(async (phoneVariant): Promise<any[]> => {
+        try {
+          const response = await fetch(
+            `https://${shopifyDomain}/admin/api/2026-04/customers.json?phone=${encodeURIComponent(phoneVariant)}&limit=250`,
+            {
+              headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+              },
+            }
+          )
+          if (!response.ok) return []
+          const data = await response.json()
+          return Array.isArray(data.customers) ? data.customers : []
+        } catch (error) {
+          console.warn(`Failed to search customer with phone variant ${phoneVariant}:`, error)
+          return []
+        }
+      })
+    )
+
+    // Îmbinăm în ordinea variantelor, fără duplicate
     const allCustomers: any[] = []
     const foundCustomerIds = new Set<string>()
-    
-    // Încearcă fiecare variantă pentru a găsi clientul
-    for (const phoneVariant of phoneVariants) {
-      try {
-        const response = await fetch(
-          `https://${shopifyDomain}/admin/api/2026-04/customers.json?phone=${encodeURIComponent(phoneVariant)}&limit=250`,
-          {
-            headers: {
-              'X-Shopify-Access-Token': accessToken,
-              'Content-Type': 'application/json',
-            },
-          }
-        )
-
-        if (response.ok) {
-          const data = await response.json()
-          
-          if (data.customers && data.customers.length > 0) {
-            // Adaugă clienții găsiți (evită duplicatele)
-            for (const customer of data.customers) {
-              if (!foundCustomerIds.has(customer.id.toString())) {
-                allCustomers.push(customer)
-                foundCustomerIds.add(customer.id.toString())
-              }
-            }
-          }
+    for (const customers of perVariant) {
+      for (const customer of customers) {
+        if (!foundCustomerIds.has(customer.id.toString())) {
+          allCustomers.push(customer)
+          foundCustomerIds.add(customer.id.toString())
         }
-      } catch (error) {
-        // Continuă cu următoarea variantă dacă aceasta eșuează
-        console.warn(`Failed to search customer with phone variant ${phoneVariant}:`, error)
       }
     }
     
@@ -377,15 +386,12 @@ export async function searchOrdersByPhone(
       }
     }
 
-    // Pasul 2: Găsește toate comenzile pentru clienții găsiți
-    const allOrders: ShopifyOrder[] = []
-    const foundOrderIds = new Set<string>()
-    
-    for (const customer of customerResult.customers) {
-      // Caută comenzile după customer_id
+    // Pasul 2: Găsește toate comenzile pentru clienții găsiți — după customer_id și
+    // după email, pentru toți clienții în paralel.
+    const fetchOrders = async (query: string, label: string): Promise<ShopifyOrder[]> => {
       try {
         const response = await fetch(
-          `https://${shopifyDomain}/admin/api/2026-04/orders.json?customer_id=${customer.id}&status=any&limit=250`,
+          `https://${shopifyDomain}/admin/api/2026-04/orders.json?${query}&status=any&limit=250`,
           {
             headers: {
               'X-Shopify-Access-Token': accessToken,
@@ -393,52 +399,29 @@ export async function searchOrdersByPhone(
             },
           }
         )
-
-        if (response.ok) {
-          const data = await response.json()
-          
-          if (data.orders && data.orders.length > 0) {
-            // Adaugă comenzile găsite (evită duplicatele)
-            for (const order of data.orders) {
-              if (!foundOrderIds.has(order.id.toString())) {
-                allOrders.push(order)
-                foundOrderIds.add(order.id.toString())
-              }
-            }
-          }
-        }
+        if (!response.ok) return []
+        const data = await response.json()
+        return Array.isArray(data.orders) ? data.orders : []
       } catch (error) {
-        console.warn(`Failed to get orders for customer ${customer.id}:`, error)
+        console.warn(`Failed to get orders for ${label}:`, error)
+        return []
       }
-      
-      // De asemenea, caută comenzile după email (dacă clientul are email)
-      if (customer.email) {
-        try {
-          const response = await fetch(
-            `https://${shopifyDomain}/admin/api/2026-04/orders.json?email=${encodeURIComponent(customer.email)}&status=any&limit=250`,
-            {
-              headers: {
-                'X-Shopify-Access-Token': accessToken,
-                'Content-Type': 'application/json',
-              },
-            }
-          )
+    }
 
-          if (response.ok) {
-            const data = await response.json()
-            
-            if (data.orders && data.orders.length > 0) {
-              // Adaugă comenzile găsite (evită duplicatele)
-              for (const order of data.orders) {
-                if (!foundOrderIds.has(order.id.toString())) {
-                  allOrders.push(order)
-                  foundOrderIds.add(order.id.toString())
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(`Failed to get orders for email ${customer.email}:`, error)
+    const batches = await Promise.all(
+      customerResult.customers.flatMap((customer: any) => [
+        fetchOrders(`customer_id=${customer.id}`, `customer ${customer.id}`),
+        ...(customer.email ? [fetchOrders(`email=${encodeURIComponent(customer.email)}`, `email ${customer.email}`)] : []),
+      ])
+    )
+
+    const allOrders: ShopifyOrder[] = []
+    const foundOrderIds = new Set<string>()
+    for (const orders of batches) {
+      for (const order of orders) {
+        if (!foundOrderIds.has(order.id.toString())) {
+          allOrders.push(order)
+          foundOrderIds.add(order.id.toString())
         }
       }
     }

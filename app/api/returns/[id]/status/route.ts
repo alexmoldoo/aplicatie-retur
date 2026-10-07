@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { findReturnById, updateReturnStatus } from '@/lib/db'
+import { findReturnById, updateReturnStatus, updateReturn } from '@/lib/db'
 import { getCurrentUserFromCookies } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { getClientIp } from '@/lib/security'
@@ -82,7 +82,19 @@ export async function PATCH(
       )
     }
 
-    const updated = await updateReturnStatus(params.id, toStatus)
+    // La FINALIZAT reținem și data: e momentul în care banii au plecat (pentru totaluri).
+    const updated = toStatus === 'FINALIZAT'
+      ? await updateReturn(params.id, {
+          status: toStatus,
+          refundData: {
+            ...existing.refundData,
+            finalizatLa: existing.refundData?.finalizatLa || new Date().toISOString(),
+            ...(existing.refundData?.plata && !existing.refundData.plata.platitLa
+              ? { plata: { ...existing.refundData.plata, platitLa: new Date().toISOString() } }
+              : {}),
+          },
+        })
+      : await updateReturnStatus(params.id, toStatus)
     if (!updated) {
       return NextResponse.json(
         { success: false, message: 'Eroare la actualizarea statusului.' },
